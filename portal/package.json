@@ -12,7 +12,8 @@
     "db:migrate": "node --env-file-if-exists=.env.local node_modules/drizzle-kit/bin.cjs migrate",
     "db:bootstrap": "tsx --env-file-if-exists=.env.local scripts/bootstrap.ts",
     "db:studio": "node --env-file-if-exists=.env.local node_modules/drizzle-kit/bin.cjs studio",
-    "vercel-build": "if [ \"$VERCEL_ENV\" = \"production\" ]; then node node_modules/drizzle-kit/bin.cjs migrate; fi && next build"
+    "vercel-build": "if [ \"$VERCEL_ENV\" = \"production\" ]; then node node_modules/drizzle-kit/bin.cjs migrate; fi && next build",
+    "db:seed:dev": "tsx --env-file-if-exists=.env.local scripts/seed-dev.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

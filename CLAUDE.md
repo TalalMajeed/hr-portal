@@ -26,9 +26,32 @@ Run from `portal/`:
 - `npm run dev`: dev server on http://localhost:3000 (reads `.env.local`)
 - `npm run db:generate`, `npm run db:migrate`: schema changes
 - `npm run db:bootstrap`: templates, settings and the first super admin on a fresh database
+- `npm run db:seed:dev`: development accounts for every role (below). Local databases only
 - `npm run lint`, `npm run typecheck`, `npm run build`
 
 Before calling work done: lint, typecheck and build pass. Run `npx next typegen` after adding routes so `PageProps<"/route">` types exist.
+
+## Development accounts
+
+`npm run db:seed:dev` (script: `portal/scripts/seed-dev.ts`) creates these on a local database. It refuses any host other than localhost, so it can't reach Neon or production, and running it again resets their passwords and roles. These are for local development only: never create them on the live site.
+
+Password for every account: `DevPass-2026`
+
+| Role | Email | Lands on |
+| --- | --- | --- |
+| Super admin | superadmin@du.test | /admin |
+| Executive Director | ed@du.test | /admin |
+| HR officer | hr@du.test | /admin |
+| Hiring lead | lead@du.test | /admin |
+| Shortlisting reviewer | reviewer@du.test | /review |
+| Panel member | panel@du.test | /panel |
+| Selection Board member | board@du.test | /board |
+| Agency | agency@du.test | /agency |
+| Candidate | candidate@du.test | /me |
+| External reviewer (no password) | external.reviewer@du.test | http://localhost:3000/x/dev-external-reviewer-link-000000 |
+| External panelist (no password) | external.panel@du.test | http://localhost:3000/x/dev-external-panel-link-0000000000 |
+
+The production super admin (`admin@du.edu.pk`) is separate; its password is only in the git-ignored `portal/.admin-credentials`.
 
 ## Conventions
 

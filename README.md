@@ -40,7 +40,9 @@ npm run db:bootstrap         # templates, settings and the first super admin (ne
 npm run dev
 ```
 
-Open http://localhost:3000. Local development uses the Neon `dev` branch; production uses `main`.
+Open http://localhost:3000. For a local Postgres, set `DATABASE_URL=postgresql://<you>@localhost:5432/du_portal`; otherwise use the Neon `dev` branch. Production uses Neon `main`.
+
+For test accounts in every role, run `npm run db:seed:dev` on a local database. The accounts and their password are listed in CLAUDE.md.
 
 ### Database changes
 
@@ -91,6 +93,7 @@ Run these from `portal/`:
 | `npm run db:generate` | Write a migration for schema changes |
 | `npm run db:migrate` | Apply pending migrations |
 | `npm run db:bootstrap` | Add templates, settings and the first super admin |
+| `npm run db:seed:dev` | Development accounts for every role (local databases only) |
 | `npm run db:studio` | Browse the database |
 | `npm run build` | Build for production |
 | `npm run start` | Serve the production build |
