@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+/* Tokens from THEME.md (read from du.edu.pk). Light only: the DU site has no dark theme. */
+:root {
+  --du-teal: #008080;
+  --du-teal-dark: #005c5c;
+  --du-tint: #e8f3f3;
+  --du-off: #f8fafa;
+  --du-sand: #d4a24c;
+  --du-text: #1f2933;
+  --du-muted: #4b5563;
+  --du-border: #d5e3e3;
+  --du-hairline: #e5eeee;
+  --du-success: #15803d;
+  --du-warning: #b45309;
+  --du-danger: #c81e1e;
+  --du-placeholder: #6b7280;
+  --du-tint-line: #c4dfdf;
+  --du-success-tint: #ecf7ef;
+  --du-success-line: #c7e6cf;
+  --du-warning-tint: #fdf4e7;
+  --du-warning-line: #f1d9b5;
+  --du-danger-tint: #fdeeee;
+  --du-danger-line: #f3caca;
+  --du-sand-tint: #faf3e6;
+  --du-sand-line: #ecd8b0;
+  --du-sand-text: #7a5a1c;
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-teal: var(--du-teal);
+  --color-teal-dark: var(--du-teal-dark);
+  --color-tint: var(--du-tint);
+  --color-off: var(--du-off);
+  --color-sand: var(--du-sand);
+  --color-ink: var(--du-text);
+  --color-muted: var(--du-muted);
+  --color-line: var(--du-border);
+  --color-hairline: var(--du-hairline);
+  --color-success: var(--du-success);
+  --color-warning: var(--du-warning);
+  --color-danger: var(--du-danger);
+  --color-placeholder: var(--du-placeholder);
+  --color-tint-line: var(--du-tint-line);
+  --color-success-tint: var(--du-success-tint);
+  --color-success-line: var(--du-success-line);
+  --color-warning-tint: var(--du-warning-tint);
+  --color-warning-line: var(--du-warning-line);
+  --color-danger-tint: var(--du-danger-tint);
+  --color-danger-line: var(--du-danger-line);
+  --color-sand-tint: var(--du-sand-tint);
+  --color-sand-line: var(--du-sand-line);
+  --color-sand-text: var(--du-sand-text);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-playfair), ui-serif, Georgia, serif;
+  --ease-du: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: #fff;
+  color: var(--du-text);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+/* Grid children may shrink, so wide tables scroll inside their card instead of widening the page. */
+.grid > * {
+  min-width: 0;
+}
+
+/* Keeps absolutely positioned children (such as sr-only labels) inside horizontal scrollers. */
+.overflow-x-auto {
+  position: relative;
+}
+
+:focus-visible {
+  outline: 2px solid var(--du-teal);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: var(--du-tint);
+  color: var(--du-teal-dark);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    font-size: 12pt;
+  }
+  @page {
+    margin: 16mm;
+  }
+}
