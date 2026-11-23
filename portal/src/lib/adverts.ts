@@ -7,15 +7,15 @@ import { formatDate } from "@/lib/format";
 import { audit } from "@/lib/audit";
 
 /** B4: published posts close by themselves at the closing date and time. */
-export function closeExpiredAdverts() {
-  const due = db
+export async function closeExpiredAdverts() {
+  const due = (await db
     .select({ id: adverts.id, positionId: adverts.positionId })
     .from(adverts)
     .where(and(eq(adverts.status, "published"), lte(adverts.closingAt, new Date().toISOString())))
-    .all();
+    );
   for (const a of due) {
-    db.update(adverts).set({ status: "closed", updatedAt: new Date().toISOString() }).where(eq(adverts.id, a.id)).run();
-    audit(null, "advert_closed", "position", a.positionId, "Closing date reached");
+    await db.update(adverts).set({ status: "closed", updatedAt: new Date().toISOString() }).where(eq(adverts.id, a.id));
+    await audit(null, "advert_closed", "position", a.positionId, "Closing date reached");
   }
   return due.length;
 }

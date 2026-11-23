@@ -24,18 +24,18 @@ export type ReportTable = { key: string; title: string; description: string; col
 /** Optional limit to positions a hiring lead can see. */
 type Scope = number[] | null;
 
-function load(scope: Scope) {
-  const ps = db.select().from(positions).all().filter((p) => !scope || scope.includes(p.id));
+async function load(scope: Scope) {
+  const ps = (await db.select().from(positions)).filter((p) => !scope || scope.includes(p.id));
   const ids = new Set(ps.map((p) => p.id));
-  const apps = db.select().from(applications).all().filter((a) => ids.has(a.positionId) && a.status !== "draft");
+  const apps = (await db.select().from(applications)).filter((a) => ids.has(a.positionId) && a.status !== "draft");
   return { ps, apps };
 }
 
 const pct = (n: number, d: number) => (d ? `${Math.round((n / d) * 100)}%` : "0%");
 
 /** I2: applications received, shortlisted, rejected and selected per post. */
-export function summaryReport(scope: Scope): ReportTable {
-  const { ps, apps } = load(scope);
+export async function summaryReport(scope: Scope): Promise<ReportTable> {
+  const { ps, apps } = await load(scope);
   return {
     key: "summary",
     title: "Summary per post",
@@ -60,12 +60,12 @@ export function summaryReport(scope: Scope): ReportTable {
 }
 
 /** I3: applied, screened, shortlisted, interviewed, talk or second round, recommended, offered, joined. */
-export function pipelineReport(scope: Scope): ReportTable {
-  const { ps, apps } = load(scope);
-  const evals = db.select().from(evaluations).all();
-  const ev = db.select().from(events).all();
-  const decisions = db.select().from(boardDecisions).all();
-  const offerRows = db.select().from(offers).all();
+export async function pipelineReport(scope: Scope): Promise<ReportTable> {
+  const { ps, apps } = await load(scope);
+  const evals = (await db.select().from(evaluations));
+  const ev = (await db.select().from(events));
+  const decisions = (await db.select().from(boardDecisions));
+  const offerRows = (await db.select().from(offers));
   return {
     key: "pipeline",
     title: "Pipeline per position",
@@ -98,9 +98,9 @@ export function pipelineReport(scope: Scope): ReportTable {
 }
 
 /** I4: faculty and administrative posts sanctioned, filled, in process and vacant. */
-export function hrSummaryReport(scope: Scope): ReportTable {
-  const { ps } = load(scope);
-  const offerRows = db.select().from(offers).all();
+export async function hrSummaryReport(scope: Scope): Promise<ReportTable> {
+  const { ps } = await load(scope);
+  const offerRows = (await db.select().from(offers));
   const rows: Cell[][] = (["faculty", "administrative"] as const).map((type) => {
     const mine = ps.filter((p) => p.type === type && p.approvalStatus === "approved" && p.status !== "withdrawn");
     const sanctioned = mine.reduce((s, p) => s + p.posts, 0);
@@ -121,10 +121,10 @@ export function hrSummaryReport(scope: Scope): ReportTable {
 }
 
 /** I5: days from the position request to an accepted offer, and days spent in each stage. */
-export function timeToHireReport(scope: Scope): ReportTable {
-  const { ps } = load(scope);
-  const evs = db.select().from(positionEvents).all().filter((e) => e.type === "stage_changed");
-  const offerRows = db.select().from(offers).all();
+export async function timeToHireReport(scope: Scope): Promise<ReportTable> {
+  const { ps } = await load(scope);
+  const evs = (await db.select().from(positionEvents)).filter((e) => e.type === "stage_changed");
+  const offerRows = (await db.select().from(offers));
   return {
     key: "time",
     title: "Time to hire",
@@ -148,10 +148,10 @@ export function timeToHireReport(scope: Scope): ReportTable {
 }
 
 /** I6: where applications come from, and how each agency performs. */
-export function sourceReport(scope: Scope): ReportTable {
-  const { apps } = load(scope);
-  const agencies = db.select().from(users).where(eq(users.role, "agency")).all();
-  const decisions = db.select().from(boardDecisions).all();
+export async function sourceReport(scope: Scope): Promise<ReportTable> {
+  const { apps } = await load(scope);
+  const agencies = (await db.select().from(users).where(eq(users.role, "agency")));
+  const decisions = (await db.select().from(boardDecisions));
   const row = (label: string, list: typeof apps): Cell[] => [
     label,
     list.length,
@@ -178,18 +178,18 @@ export function sourceReport(scope: Scope): ReportTable {
 }
 
 /** I7: panels served and evaluations submitted, and whether on time (within 48 hours of the session). */
-export function panelActivityReport(scope: Scope): ReportTable {
-  const { ps } = load(scope);
+export async function panelActivityReport(scope: Scope): Promise<ReportTable> {
+  const { ps } = await load(scope);
   const ids = new Set(ps.map((p) => p.id));
-  const members = db
+  const members = (await db
     .select({ m: panelMembers, u: users, p: panels })
     .from(panelMembers)
     .innerJoin(users, eq(users.id, panelMembers.userId))
     .innerJoin(panels, eq(panels.id, panelMembers.panelId))
-    .all()
+    )
     .filter((r) => ids.has(r.p.positionId));
-  const evals = db.select().from(evaluations).all();
-  const evs = new Map(db.select().from(events).all().map((e) => [e.id, e]));
+  const evals = (await db.select().from(evaluations));
+  const evs = new Map((await db.select().from(events)).map((e) => [e.id, e]));
   const people = new Map<number, typeof users.$inferSelect>();
   for (const r of members) people.set(r.u.id, r.u);
   return {
@@ -223,10 +223,10 @@ export function panelActivityReport(scope: Scope): ReportTable {
 }
 
 /** I8: applicant profile for diversity and outreach. Counts unique candidates. */
-export function applicantProfileReport(scope: Scope): ReportTable {
-  const { apps } = load(scope);
+export async function applicantProfileReport(scope: Scope): Promise<ReportTable> {
+  const { apps } = await load(scope);
   const candidateIds = [...new Set(apps.map((a) => a.candidateId))];
-  const profiles = db.select().from(candidateProfiles).all().filter((p) => candidateIds.includes(p.userId));
+  const profiles = (await db.select().from(candidateProfiles)).filter((p) => candidateIds.includes(p.userId));
   const total = profiles.length;
   const tally = (dimension: string, values: string[]) => {
     const m = new Map<string, number>();
@@ -254,15 +254,15 @@ export function applicantProfileReport(scope: Scope): ReportTable {
 }
 
 /** I9: every application of a post with its status. */
-export function applicationsReport(positionId: number): ReportTable {
-  const p = db.select().from(positions).where(eq(positions.id, positionId)).get();
-  const rows = db
+export async function applicationsReport(positionId: number): Promise<ReportTable> {
+  const p = (await db.select().from(positions).where(eq(positions.id, positionId)))[0];
+  const rows = (await db
     .select({ a: applications, u: users, prof: candidateProfiles })
     .from(applications)
     .innerJoin(users, eq(users.id, applications.candidateId))
     .leftJoin(candidateProfiles, eq(candidateProfiles.userId, users.id))
     .where(eq(applications.positionId, positionId))
-    .all()
+    )
     .filter((r) => r.a.status !== "draft");
   return {
     key: "applications",
@@ -290,7 +290,7 @@ export function applicationsReport(positionId: number): ReportTable {
   };
 }
 
-export const REPORTS: Record<string, (scope: Scope) => ReportTable> = {
+export const REPORTS: Record<string, (scope: Scope) => Promise<ReportTable>> = {
   summary: summaryReport,
   pipeline: pipelineReport,
   hr: hrSummaryReport,

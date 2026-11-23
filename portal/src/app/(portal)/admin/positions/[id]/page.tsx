@@ -27,14 +27,14 @@ const EVENT_LABELS: Record<string, string> = {
 export default async function PositionOverview({ params }: PageProps<"/admin/positions/[id]">) {
   const user = await requireUser(STAFF_ROLES);
   const p = await positionForPage(user, (await params).id);
-  const leads = db.select({ id: users.id, name: users.name, designation: users.designation }).from(users).where(eq(users.role, "hiring_lead")).all();
-  const history = db.select({ e: positionEvents, name: users.name }).from(positionEvents).leftJoin(users, eq(users.id, positionEvents.userId)).where(eq(positionEvents.positionId, p.id)).orderBy(desc(positionEvents.createdAt)).all();
-  const counts = db
-    .select({ status: applications.status, n: sql<number>`count(*)` })
+  const leads = (await db.select({ id: users.id, name: users.name, designation: users.designation }).from(users).where(eq(users.role, "hiring_lead")));
+  const history = (await db.select({ e: positionEvents, name: users.name }).from(positionEvents).leftJoin(users, eq(users.id, positionEvents.userId)).where(eq(positionEvents.positionId, p.id)).orderBy(desc(positionEvents.createdAt)));
+  const counts = (await db
+    .select({ status: applications.status, n: sql<number>`count(*)::int` })
     .from(applications)
     .where(eq(applications.positionId, p.id))
     .groupBy(applications.status)
-    .all();
+    );
   const total = counts.filter((c) => c.status !== "draft").reduce((s, c) => s + c.n, 0);
 
   const isHr = ["hr", "super_admin"].includes(user.role);

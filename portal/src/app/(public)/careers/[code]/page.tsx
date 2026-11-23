@@ -16,7 +16,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 
 export async function generateMetadata({ params }: PageProps<"/careers/[code]">): Promise<Metadata> {
   const { code } = await params;
-  const post = postByCode(code);
+  const post = await postByCode(code);
   return { title: post ? post.position.title : "Position" };
 }
 
@@ -36,16 +36,16 @@ function List({ items }: { items: string[] }) {
 
 export default async function PostPage({ params }: PageProps<"/careers/[code]">) {
   const { code } = await params;
-  const post = postByCode(code);
+  const post = await postByCode(code);
   if (!post || !post.advert.publishedAt || ["draft", "pending_approval"].includes(post.advert.status)) notFound();
   const { position: p, advert: a } = post;
   const open = advertIsOpen(a);
-  const jd = getDoc(p.id, "jd");
-  const criteria = getDoc(p.id, "criteria");
+  const jd = await getDoc(p.id, "jd");
+  const criteria = await getDoc(p.id, "criteria");
   const user = await getUser();
   const mine =
     user?.role === "candidate"
-      ? db.select().from(applications).where(and(eq(applications.positionId, p.id), eq(applications.candidateId, user.id))).get()
+      ? (await db.select().from(applications).where(and(eq(applications.positionId, p.id), eq(applications.candidateId, user.id))))[0]
       : undefined;
 
   const applyHref = `/me/apply/${p.code}`;

@@ -27,35 +27,35 @@ export function eventLocationText(e: Pick<EventRow, "mode" | "venue" | "meetingU
 }
 
 /** The event with its position, application, candidate and candidate time zone. */
-export function loadEvent(eventId: number) {
-  const row = db
+export async function loadEvent(eventId: number) {
+  const row = (await db
     .select({ event: events, position: positions, app: applications, candidate: users })
     .from(events)
     .innerJoin(positions, eq(positions.id, events.positionId))
     .innerJoin(applications, eq(applications.id, events.applicationId))
     .innerJoin(users, eq(users.id, applications.candidateId))
     .where(eq(events.id, eventId))
-    .get();
+    )[0];
   if (!row) return null;
-  const tz = db.select({ tz: candidateProfiles.timezone }).from(candidateProfiles).where(eq(candidateProfiles.userId, row.candidate.id)).get()?.tz ?? PKT;
+  const tz = (await db.select({ tz: candidateProfiles.timezone }).from(candidateProfiles).where(eq(candidateProfiles.userId, row.candidate.id)))[0]?.tz ?? PKT;
   return { ...row, tz };
 }
 
 /** Accepted panel members of the event's panel who have not declared a conflict with this candidate. */
-export function eventPanelists(e: Pick<EventRow, "panelId" | "applicationId">) {
+export async function eventPanelists(e: Pick<EventRow, "panelId" | "applicationId">) {
   if (!e.panelId) return [];
-  const members = db
+  const members = (await db
     .select({ user: users, member: panelMembers })
     .from(panelMembers)
     .innerJoin(users, eq(users.id, panelMembers.userId))
     .where(and(eq(panelMembers.panelId, e.panelId), eq(panelMembers.inviteStatus, "accepted")))
-    .all();
+    );
   const conflicted = new Set(
-    db
+    (await db
       .select({ userId: conflicts.userId })
       .from(conflicts)
       .where(and(eq(conflicts.panelId, e.panelId), eq(conflicts.applicationId, e.applicationId), eq(conflicts.hasConflict, true)))
-      .all()
+      )
       .map((c) => c.userId),
   );
   return members.filter((m) => !conflicted.has(m.user.id));
@@ -70,12 +70,12 @@ export function isPlaceholder(email: string) {
 }
 
 /** F2: emails the candidate their invitation for the event's round. */
-export function sendEventInvite(eventId: number) {
-  const r = loadEvent(eventId);
+export async function sendEventInvite(eventId: number) {
+  const r = await loadEvent(eventId);
   if (!r || isPlaceholder(r.candidate.email)) return;
   const e = r.event;
   const key = e.round === "interview" ? "interview_invite" : e.round === "talk" ? "talk_invite" : "second_round_invite";
-  sendTemplate(
+  await sendTemplate(
     key,
     { email: r.candidate.email, userId: r.candidate.id },
     {
@@ -95,8 +95,8 @@ export function sendEventInvite(eventId: number) {
 }
 
 /** F4: tells the candidate and the panel about a new time. */
-export function sendRescheduleNotices(eventId: number) {
-  const r = loadEvent(eventId);
+export async function sendRescheduleNotices(eventId: number) {
+  const r = await loadEvent(eventId);
   if (!r) return;
   const e = r.event;
   const vars = {
@@ -106,10 +106,10 @@ export function sendRescheduleNotices(eventId: number) {
     venue_or_link: eventLocationText(e),
   };
   if (!isPlaceholder(r.candidate.email)) {
-    sendTemplate("event_rescheduled", { email: r.candidate.email, userId: r.candidate.id }, { ...vars, name: r.candidate.name, when: formatDual(e.startsAt, r.tz) }, { applicationId: r.app.id, positionId: r.position.id });
+    await sendTemplate("event_rescheduled", { email: r.candidate.email, userId: r.candidate.id }, { ...vars, name: r.candidate.name, when: formatDual(e.startsAt, r.tz) }, { applicationId: r.app.id, positionId: r.position.id });
   }
-  for (const m of eventPanelists(e)) {
-    sendTemplate(
+  for (const m of await eventPanelists(e)) {
+    await sendTemplate(
       "event_rescheduled",
       { email: m.user.email, userId: m.user.id },
       { ...vars, name: m.user.name, session: `${sessionLabel(e.round)} with ${r.candidate.name}`, when: `${formatDateTime(e.startsAt)} PKT` },

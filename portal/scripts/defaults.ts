@@ -1,4 +1,4 @@
-import type { JdContent } from "../../src/lib/db/schema";
+import type { JdContent } from "../src/lib/db/schema";
 
 export const EMAIL_TEMPLATES: { key: string; name: string; subject: string; body: string }[] = [
   {

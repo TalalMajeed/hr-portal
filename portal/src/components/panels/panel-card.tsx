@@ -40,31 +40,31 @@ const PANEL_STATUS: Record<string, { label: string; tone: Tone }> = {
 };
 
 /** One panel: members, invitations, replacements, ED approval and the availability poll. */
-export function PanelCard({ panel, user }: { panel: typeof panels.$inferSelect; user: SessionUser }) {
-  const members = db
+export async function PanelCard({ panel, user }: { panel: typeof panels.$inferSelect; user: SessionUser }) {
+  const members = (await db
     .select({ m: panelMembers, u: users })
     .from(panelMembers)
     .innerJoin(users, eq(users.id, panelMembers.userId))
     .where(eq(panelMembers.panelId, panel.id))
     .orderBy(asc(panelMembers.id))
-    .all();
+    );
   const active = members.filter((r) => r.m.inviteStatus !== "replaced");
-  const directory = db.select().from(users).where(and(eq(users.role, "panel"), eq(users.active, true))).orderBy(asc(users.name)).all();
+  const directory = (await db.select().from(users).where(and(eq(users.role, "panel"), eq(users.active, true))).orderBy(asc(users.name)));
   const available = directory.filter((d) => !members.some((r) => r.u.id === d.id));
-  const slots = db.select().from(panelSlots).where(eq(panelSlots.panelId, panel.id)).orderBy(asc(panelSlots.startsAt)).all();
+  const slots = (await db.select().from(panelSlots).where(eq(panelSlots.panelId, panel.id)).orderBy(asc(panelSlots.startsAt)));
   const marks = slots.length
-    ? db.select().from(panelAvailability).where(inArray(panelAvailability.slotId, slots.map((s) => s.id))).all()
+    ? (await db.select().from(panelAvailability).where(inArray(panelAvailability.slotId, slots.map((s) => s.id))))
     : [];
-  const declared = db
+  const declared = (await db
     .select({ c: conflicts, panelist: users.name, appNo: applications.appNo, candidateId: applications.candidateId })
     .from(conflicts)
     .innerJoin(users, eq(users.id, conflicts.userId))
     .innerJoin(applications, eq(applications.id, conflicts.applicationId))
     .where(and(eq(conflicts.panelId, panel.id), eq(conflicts.hasConflict, true)))
-    .all();
+    );
   const candidateNames = new Map(
     declared.length
-      ? db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, declared.map((d) => d.candidateId))).all().map((u) => [u.id, u.name])
+      ? (await db.select({ id: users.id, name: users.name }).from(users).where(inArray(users.id, declared.map((d) => d.candidateId)))).map((u) => [u.id, u.name])
       : [],
   );
   const notInvited = active.filter((r) => r.m.inviteStatus === "not_sent").length;

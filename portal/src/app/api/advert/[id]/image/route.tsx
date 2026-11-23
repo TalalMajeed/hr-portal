@@ -1,6 +1,4 @@
 import { ImageResponse } from "next/og";
-import fs from "node:fs/promises";
-import path from "node:path";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { adverts, positions } from "@/lib/db/schema";
@@ -9,15 +7,16 @@ import { canManagePosition } from "@/lib/access";
 import { formatDate } from "@/lib/format";
 
 /** B5: a 1200 by 1200 image of the ad for LinkedIn and social media. Public once published. */
-export async function GET(_: Request, ctx: RouteContext<"/api/advert/[id]/image">) {
+export async function GET(request: Request, ctx: RouteContext<"/api/advert/[id]/image">) {
   const { id } = await ctx.params;
-  const p = db.select().from(positions).where(eq(positions.id, Number(id))).get();
-  const ad = p && db.select().from(adverts).where(eq(adverts.positionId, p.id)).get();
+  const p = (await db.select().from(positions).where(eq(positions.id, Number(id))))[0];
+  const ad = p && (await db.select().from(adverts).where(eq(adverts.positionId, p.id)))[0];
   if (!p || !ad) return new Response("Not found", { status: 404 });
   const user = await getUser();
   if (ad.status !== "published" && !(user && canManagePosition(user, p))) return new Response("Not found", { status: 404 });
 
-  const logo = await fs.readFile(path.join(process.cwd(), "public", "du-logo.png"));
+  // Public files aren't bundled with serverless functions, so fetch the logo over HTTP.
+  const logo = Buffer.from(await (await fetch(new URL("/du-logo.png", request.url))).arrayBuffer());
   const logoSrc = `data:image/png;base64,${logo.toString("base64")}`;
 
   return new ImageResponse(

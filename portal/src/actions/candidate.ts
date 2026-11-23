@@ -27,15 +27,13 @@ import { sendTemplate } from "@/lib/email";
 import { buildSnapshot, nextAppNo, setApplicationStatus } from "@/lib/applications";
 import { checkEligibility } from "@/lib/eligibility";
 import { getDoc, setStage } from "@/lib/positions";
-import { isFile, saveUpload, UPLOAD_DIR } from "@/lib/uploads";
+import { isFile, saveUpload } from "@/lib/uploads";
 import { detectDuplicate } from "@/lib/duplicates";
 import { advertIsOpen, emailHr, getProfile, profileDocuments } from "@/lib/candidate";
 import { documentKindLabel, ROUND_LABELS, TIMEZONES } from "@/lib/constants";
 import { formatDateTime } from "@/lib/format";
 import { STATEMENT_LABELS } from "@/components/applications/profile-view";
 import { done, fail, safe, str, type ActionState } from "@/lib/action-state";
-import fs from "node:fs/promises";
-import path from "node:path";
 
 /* ------------------------------------------------------------------ */
 /* Profile (C1, C2, C4, C12)                                           */
@@ -69,11 +67,11 @@ export async function savePersonalAction(_: ActionState, fd: FormData): Promise<
       researchInterests: str(fd, "researchInterests"),
       updatedAt: new Date().toISOString(),
     };
-    db.update(users).set({ name: parsed.data.name, phone: parsed.data.phone }).where(eq(users.id, user.id)).run();
-    const existing = db.select().from(candidateProfiles).where(eq(candidateProfiles.userId, user.id)).get();
-    if (existing) db.update(candidateProfiles).set(values).where(eq(candidateProfiles.userId, user.id)).run();
-    else db.insert(candidateProfiles).values({ userId: user.id, ...values }).run();
-    audit(user.id, "profile_updated", "user", user.id, "personal details");
+    await db.update(users).set({ name: parsed.data.name, phone: parsed.data.phone }).where(eq(users.id, user.id));
+    const existing = (await db.select().from(candidateProfiles).where(eq(candidateProfiles.userId, user.id)))[0];
+    if (existing) await db.update(candidateProfiles).set(values).where(eq(candidateProfiles.userId, user.id));
+    else await db.insert(candidateProfiles).values({ userId: user.id, ...values });
+    await audit(user.id, "profile_updated", "user", user.id, "personal details");
     revalidatePath("/me/profile");
     return done("Personal details saved.");
   });
@@ -155,10 +153,10 @@ export async function saveSectionAction(_: ActionState, fd: FormData): Promise<A
     if (section === "experience") values.experience = (parsed.data as Experience[]).map((e) => ({ ...e, to: e.current ? "" : e.to }));
     if (section === "publications") values.publications = parsed.data as Publication[];
     if (section === "references") values.references = parsed.data as Reference[];
-    const existing = db.select().from(candidateProfiles).where(eq(candidateProfiles.userId, user.id)).get();
-    if (existing) db.update(candidateProfiles).set(values).where(eq(candidateProfiles.userId, user.id)).run();
-    else db.insert(candidateProfiles).values({ userId: user.id, ...values }).run();
-    audit(user.id, "profile_updated", "user", user.id, section);
+    const existing = (await db.select().from(candidateProfiles).where(eq(candidateProfiles.userId, user.id)))[0];
+    if (existing) await db.update(candidateProfiles).set(values).where(eq(candidateProfiles.userId, user.id));
+    else await db.insert(candidateProfiles).values({ userId: user.id, ...values });
+    await audit(user.id, "profile_updated", "user", user.id, section);
     revalidatePath("/me/profile");
     return done("Saved.");
   });
@@ -185,22 +183,21 @@ export async function deleteProfileDocumentAction(_: ActionState, fd: FormData):
   return safe(async () => {
     const user = await assertUser(["candidate"]);
     const id = Number(str(fd, "id"));
-    const doc = db.select().from(documents).where(eq(documents.id, id)).get();
+    const doc = (await db.select().from(documents).where(eq(documents.id, id)))[0];
     if (!doc || doc.ownerUserId !== user.id || doc.applicationId) return fail("That document can't be removed.");
     // Submitted applications keep their own frozen list; only unlink the file from the profile.
-    const referenced = db
+    const referenced = (await db
       .select({ snapshot: applications.snapshot })
       .from(applications)
       .where(eq(applications.candidateId, user.id))
-      .all()
+      )
       .some((a) => a.snapshot?.documents.some((d) => d.id === id));
     if (referenced) {
-      db.update(documents).set({ ownerUserId: null, label: `${doc.label || documentKindLabel(doc.kind)} (removed from profile)` }).where(eq(documents.id, id)).run();
+      await db.update(documents).set({ ownerUserId: null, label: `${doc.label || documentKindLabel(doc.kind)} (removed from profile)` }).where(eq(documents.id, id));
     } else {
-      db.delete(documents).where(eq(documents.id, id)).run();
-      await fs.rm(path.join(UPLOAD_DIR, path.basename(doc.storedName)), { force: true });
+      await db.delete(documents).where(eq(documents.id, id));
     }
-    audit(user.id, "document_removed", "document", id, doc.filename);
+    await audit(user.id, "document_removed", "document", id, doc.filename);
     revalidatePath("/me/profile");
     return done("Document removed.");
   });
@@ -215,22 +212,22 @@ export async function saveApplicationAction(_: ActionState, fd: FormData): Promi
     const user = await assertUser(["candidate"]);
     const intent = str(fd, "intent") === "submit" ? "submit" : "draft";
     const positionId = Number(str(fd, "positionId"));
-    const row = db
+    const row = (await db
       .select({ position: positions, advert: adverts })
       .from(positions)
       .innerJoin(adverts, eq(adverts.positionId, positions.id))
       .where(eq(positions.id, positionId))
-      .get();
+      )[0];
     if (!row) return fail("This position no longer exists.");
     const { position, advert } = row;
     if (!advertIsOpen(advert)) return fail("This position has closed and no longer takes applications.");
     if (!user.emailVerified) return fail("Verify your email before you apply.");
 
-    let app = db
+    let app = (await db
       .select()
       .from(applications)
       .where(and(eq(applications.positionId, position.id), eq(applications.candidateId, user.id)))
-      .get();
+      )[0];
     if (app && app.status !== "draft") return fail(`You have already applied for this post (${app.appNo}). Only one application per post is allowed.`);
 
     const answers: Record<string, string> = {};
@@ -239,10 +236,10 @@ export async function saveApplicationAction(_: ActionState, fd: FormData): Promi
     const consent = fd.get("consent") === "on";
 
     if (!app) {
-      app = db.insert(applications).values({ positionId: position.id, candidateId: user.id, status: "draft", answers, consent }).returning().get();
-      audit(user.id, "draft_started", "application", app.id, position.code);
+      app = (await db.insert(applications).values({ positionId: position.id, candidateId: user.id, status: "draft", answers, consent }).returning())[0];
+      await audit(user.id, "draft_started", "application", app.id, position.code);
     } else {
-      db.update(applications).set({ answers, consent, updatedAt: new Date().toISOString() }).where(eq(applications.id, app.id)).run();
+      await db.update(applications).set({ answers, consent, updatedAt: new Date().toISOString() }).where(eq(applications.id, app.id));
     }
 
     // Post-specific uploads go on the application itself.
@@ -263,39 +260,39 @@ export async function saveApplicationAction(_: ActionState, fd: FormData): Promi
       for (const [k, label] of Object.entries(STATEMENT_LABELS)) if (answers[k].length < 50) missing.push(`${label} (at least 50 characters)`);
     }
     for (const q of advert.questions) if (q.required && !answers[q.key]) missing.push(q.label);
-    const appDocs = db.select().from(documents).where(eq(documents.applicationId, app.id)).all();
+    const appDocs = (await db.select().from(documents).where(eq(documents.applicationId, app.id)));
     for (const u of advert.extraUploads) if (u.required && !appDocs.some((d) => d.label === u.label)) missing.push(u.label);
-    const profile = getProfile(user.id);
+    const profile = await getProfile(user.id);
     if (!profile.education.length) missing.push("At least one qualification in your profile");
-    const docKinds = profileDocuments(user.id).map((d) => d.kind);
-    const jd = getDoc(position.id, "jd");
+    const docKinds = (await profileDocuments(user.id)).map((d) => d.kind);
+    const jd = await getDoc(position.id, "jd");
     for (const kind of jd?.requiredDocuments ?? []) if (!docKinds.includes(kind as never)) missing.push(`${documentKindLabel(kind)} in your profile documents`);
     if (!consent) missing.push("Your consent to DU processing your data");
     if (missing.length) return fail(`Before you submit, add: ${missing.join("; ")}.`);
 
-    const eligibility = checkEligibility(getDoc(position.id, "criteria"), profile, docKinds);
+    const eligibility = checkEligibility(await getDoc(position.id, "criteria"), profile, docKinds);
     if (!eligibility.passed && position.eligibilityMode === "block") {
       const unmet = eligibility.items.filter((i) => i.mandatory && !i.met).map((i) => `${i.label} (${i.note})`);
-      audit(user.id, "application_blocked", "application", app.id, unmet.join("; "));
+      await audit(user.id, "application_blocked", "application", app.id, unmet.join("; "));
       return fail(`You don't meet these required criteria, so this post can't accept your application: ${unmet.join("; ")}.`);
     }
 
     const now = new Date().toISOString();
-    const appNo = nextAppNo(position.code, position.id);
-    db.update(applications)
-      .set({ appNo, status: "applied", eligibility, snapshot: buildSnapshot(user.id), submittedAt: now, updatedAt: now })
+    const appNo = await nextAppNo(position.code, position.id);
+    await db.update(applications)
+      .set({ appNo, status: "applied", eligibility, snapshot: await buildSnapshot(user.id), submittedAt: now, updatedAt: now })
       .where(eq(applications.id, app.id))
-      .run();
-    db.insert(applicationStatusHistory).values({ applicationId: app.id, fromStatus: "draft", toStatus: "applied", userId: user.id }).run();
-    audit(user.id, "application_submitted", "application", app.id, `${appNo}${eligibility.passed ? "" : " (flagged: criteria not met)"}`);
-    sendTemplate(
+      ;
+    await db.insert(applicationStatusHistory).values({ applicationId: app.id, fromStatus: "draft", toStatus: "applied", userId: user.id });
+    await audit(user.id, "application_submitted", "application", app.id, `${appNo}${eligibility.passed ? "" : " (flagged: criteria not met)"}`);
+    await sendTemplate(
       "application_received",
       { email: user.email, userId: user.id },
       { name: user.name, position: position.title, app_no: appNo, submitted_at: `${formatDateTime(now)} PKT` },
       { applicationId: app.id, positionId: position.id },
     );
-    detectDuplicate(app.id, user.id);
-    setStage(position.id, 4, user.id, "Applications received");
+    await detectDuplicate(app.id, user.id);
+    await setStage(position.id, 4, user.id, "Applications received");
     revalidatePath("/me");
     redirect(`/me/applications/${app.id}?submitted=1`);
   });
@@ -303,13 +300,13 @@ export async function saveApplicationAction(_: ActionState, fd: FormData): Promi
 
 async function ownApplication(applicationId: number) {
   const user = await assertUser(["candidate"]);
-  const row = db
+  const row = (await db
     .select({ app: applications, position: positions, advert: adverts })
     .from(applications)
     .innerJoin(positions, eq(positions.id, applications.positionId))
     .leftJoin(adverts, eq(adverts.positionId, positions.id))
     .where(and(eq(applications.id, applicationId), eq(applications.candidateId, user.id)))
-    .get();
+    )[0];
   if (!row) throw new Error("That application isn't yours.");
   return { user, ...row };
 }
@@ -320,14 +317,14 @@ export async function withdrawApplicationAction(_: ActionState, fd: FormData): P
     if (!advertIsOpen(advert)) return fail("The closing date has passed, so this application can't be withdrawn here. Contact DU HR.");
     if (["withdrawn", "selected", "not_selected"].includes(app.status)) return fail("This application can't be withdrawn.");
     if (app.status === "draft") {
-      db.delete(documents).where(eq(documents.applicationId, app.id)).run();
-      db.delete(applications).where(eq(applications.id, app.id)).run();
-      audit(user.id, "draft_deleted", "application", app.id);
+      await db.delete(documents).where(eq(documents.applicationId, app.id));
+      await db.delete(applications).where(eq(applications.id, app.id));
+      await audit(user.id, "draft_deleted", "application", app.id);
       revalidatePath("/me");
       redirect("/me");
     }
-    db.update(applications).set({ withdrawnAt: new Date().toISOString() }).where(eq(applications.id, app.id)).run();
-    setApplicationStatus(app.id, "withdrawn", user.id, { note: "Withdrawn by the candidate" });
+    await db.update(applications).set({ withdrawnAt: new Date().toISOString() }).where(eq(applications.id, app.id));
+    await setApplicationStatus(app.id, "withdrawn", user.id, { note: "Withdrawn by the candidate" });
     revalidatePath(`/me/applications/${app.id}`);
     revalidatePath("/me");
     return done("Your application has been withdrawn.");
@@ -341,7 +338,7 @@ export async function withdrawApplicationAction(_: ActionState, fd: FormData): P
 export async function fulfilDocumentRequestAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const requestId = Number(str(fd, "requestId"));
-    const req = db.select().from(documentRequests).where(eq(documentRequests.id, requestId)).get();
+    const req = (await db.select().from(documentRequests).where(eq(documentRequests.id, requestId)))[0];
     if (!req) return fail("That request no longer exists.");
     const { user, app, position } = await ownApplication(req.applicationId);
     if (req.status !== "open") return fail("You've already uploaded this document.");
@@ -349,9 +346,9 @@ export async function fulfilDocumentRequestAction(_: ActionState, fd: FormData):
     if (!isFile(file)) return fail("Choose a file to upload.");
     const r = await saveUpload(file, { kind: "other", ownerUserId: user.id, applicationId: app.id, uploadedBy: user.id, label: req.label });
     if (!r.ok) return fail(r.error);
-    db.update(documentRequests).set({ status: "fulfilled", documentId: r.id }).where(eq(documentRequests.id, req.id)).run();
-    audit(user.id, "document_request_fulfilled", "application", app.id, req.label);
-    emailHr(`Document uploaded: ${app.appNo}`, `${user.name} uploaded "${req.label}" for application ${app.appNo} (${position.title}).`, {
+    await db.update(documentRequests).set({ status: "fulfilled", documentId: r.id }).where(eq(documentRequests.id, req.id));
+    await audit(user.id, "document_request_fulfilled", "application", app.id, req.label);
+    await emailHr(`Document uploaded: ${app.appNo}`, `${user.name} uploaded "${req.label}" for application ${app.appNo} (${position.title}).`, {
       applicationId: app.id,
       positionId: position.id,
     });
@@ -371,13 +368,13 @@ export async function respondToEventAction(_: ActionState, fd: FormData): Promis
     const eventId = Number(str(fd, "eventId"));
     const intent = str(fd, "intent");
     const note = str(fd, "note").slice(0, 1000);
-    const row = db
+    const row = (await db
       .select({ event: events, app: applications, position: positions })
       .from(events)
       .innerJoin(applications, eq(applications.id, events.applicationId))
       .innerJoin(positions, eq(positions.id, events.positionId))
       .where(and(eq(events.id, eventId), eq(applications.candidateId, user.id)))
-      .get();
+      )[0];
     if (!row) return fail("That invitation isn't yours.");
     const { event, app, position } = row;
     if (["cancelled", "completed"].includes(event.status)) return fail("This session is no longer open for replies.");
@@ -386,11 +383,11 @@ export async function respondToEventAction(_: ActionState, fd: FormData): Promis
     const status = map[intent as keyof typeof map];
     if (!status) return fail("Choose a reply.");
     if (status === "reschedule_requested" && note.length < 5) return fail("Tell HR which times suit you better.");
-    db.update(events).set({ status, candidateNote: note, updatedAt: new Date().toISOString() }).where(eq(events.id, event.id)).run();
-    audit(user.id, `event_${status}`, "event", event.id, note);
+    await db.update(events).set({ status, candidateNote: note, updatedAt: new Date().toISOString() }).where(eq(events.id, event.id));
+    await audit(user.id, `event_${status}`, "event", event.id, note);
     const session = ROUND_LABELS[event.round].toLowerCase();
     const reply = { confirmed: "confirmed", declined: "declined", reschedule_requested: "asked for another time for" }[status];
-    emailHr(
+    await emailHr(
       `${user.name} ${reply} the ${session}: ${position.title}`,
       `${user.name} (${app.appNo}) ${reply} the ${session} on ${formatDateTime(event.startsAt)} PKT for ${position.title}.${note ? `\n\nTheir note: ${note}` : ""}`,
       { applicationId: app.id, positionId: position.id },
@@ -412,20 +409,20 @@ export async function respondToOfferAction(_: ActionState, fd: FormData): Promis
     const user = await assertUser(["candidate"]);
     const offerId = Number(str(fd, "offerId"));
     const intent = str(fd, "intent");
-    const row = db
+    const row = (await db
       .select({ offer: offers, app: applications, position: positions })
       .from(offers)
       .innerJoin(applications, eq(applications.id, offers.applicationId))
       .innerJoin(positions, eq(positions.id, offers.positionId))
       .where(and(eq(offers.id, offerId), eq(applications.candidateId, user.id)))
-      .get();
+      )[0];
     if (!row) return fail("That offer isn't yours.");
     if (row.offer.status !== "sent") return fail("You've already replied to this offer.");
     if (intent !== "accept" && intent !== "decline") return fail("Choose accept or decline.");
     const status = intent === "accept" ? "accepted" : "declined";
-    db.update(offers).set({ status, respondedAt: new Date().toISOString() }).where(eq(offers.id, row.offer.id)).run();
-    audit(user.id, `offer_${status}`, "offer", row.offer.id, row.app.appNo ?? "");
-    emailHr(`Offer ${status}: ${row.position.title}`, `${user.name} (${row.app.appNo}) has ${status} the offer for ${row.position.title}.`, {
+    await db.update(offers).set({ status, respondedAt: new Date().toISOString() }).where(eq(offers.id, row.offer.id));
+    await audit(user.id, `offer_${status}`, "offer", row.offer.id, row.app.appNo ?? "");
+    await emailHr(`Offer ${status}: ${row.position.title}`, `${user.name} (${row.app.appNo}) has ${status} the offer for ${row.position.title}.`, {
       applicationId: row.app.id,
       positionId: row.position.id,
     });

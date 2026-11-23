@@ -23,8 +23,8 @@ import { EMPTY_JD, EMPTY_RUBRIC, getDoc, getPosition, nextPositionCode, saveDoc,
 import { done, fail, lines, num, safe, str, type ActionState } from "@/lib/action-state";
 import { STAFF_ROLES } from "@/lib/constants";
 
-function load(user: SessionUser, id: number) {
-  const p = getPosition(id);
+async function load(user: SessionUser, id: number) {
+  const p = await getPosition(id);
   if (!p || !canManagePosition(user, p)) throw new Error("Position not found.");
   return p;
 }
@@ -65,42 +65,42 @@ export async function createPositionAction(_: ActionState, fd: FormData): Promis
   const errors = validate(f);
   if (Object.keys(errors).length) return fail("Check the highlighted fields.", errors);
   const hiringLeadId = user.role === "hiring_lead" ? user.id : Number(str(fd, "hiringLeadId")) || null;
-  const row = db
+  const row = (await db
     .insert(positions)
-    .values({ ...f, code: nextPositionCode(), hiringLeadId, createdBy: user.id })
+    .values({ ...f, code: await nextPositionCode(), hiringLeadId, createdBy: user.id })
     .returning()
-    .get();
-  const tpl = db.select().from(jdTemplates).where(eq(jdTemplates.type, f.type)).get();
-  saveDoc(row.id, "jd", tpl?.content ?? EMPTY_JD, user.id, tpl ? `Started from template "${tpl.name}"` : "Blank");
-  saveDoc(row.id, "criteria", { items: [] }, user.id, "Blank");
-  saveDoc(row.id, "rubric", EMPTY_RUBRIC, user.id, "Blank");
-  saveDoc(row.id, "tor_position", { body: "" }, user.id, "Blank");
-  saveDoc(row.id, "tor_committee", { body: "" }, user.id, "Blank");
-  audit(user.id, "position_created", "position", row.id, `${row.code} ${row.title}`);
+    )[0];
+  const tpl = (await db.select().from(jdTemplates).where(eq(jdTemplates.type, f.type)))[0];
+  await saveDoc(row.id, "jd", tpl?.content ?? EMPTY_JD, user.id, tpl ? `Started from template "${tpl.name}"` : "Blank");
+  await saveDoc(row.id, "criteria", { items: [] }, user.id, "Blank");
+  await saveDoc(row.id, "rubric", EMPTY_RUBRIC, user.id, "Blank");
+  await saveDoc(row.id, "tor_position", { body: "" }, user.id, "Blank");
+  await saveDoc(row.id, "tor_committee", { body: "" }, user.id, "Blank");
+  await audit(user.id, "position_created", "position", row.id, `${row.code} ${row.title}`);
   redirect(`/admin/positions/${row.id}/setup`);
 }
 
 export async function updatePositionAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const user = await assertUser(["super_admin", "hr", "hiring_lead", "ed"]);
-    const p = load(user, num(fd, "id"));
+    const p = await load(user, num(fd, "id"));
     const f = positionFields(fd);
     const errors = validate(f);
     if (Object.keys(errors).length) return fail("Check the highlighted fields.", errors);
     const hiringLeadId = Number(str(fd, "hiringLeadId")) || p.hiringLeadId;
-    db.update(positions)
+    await db.update(positions)
       .set({ ...f, hiringLeadId, updatedAt: new Date().toISOString() })
       .where(eq(positions.id, p.id))
-      .run();
-    audit(user.id, "position_updated", "position", p.id);
+      ;
+    await audit(user.id, "position_updated", "position", p.id);
     revalidatePath(`/admin/positions/${p.id}`, "layout");
     return done("Position saved.");
   });
 }
 
-function notify(role: "hr" | "ed", subject: string, body: string, positionId: number) {
-  for (const u of db.select().from(users).where(eq(users.role, role)).all()) {
-    if (u.active) sendEmail({ email: u.email, userId: u.id }, subject, body, { positionId });
+async function notify(role: "hr" | "ed", subject: string, body: string, positionId: number) {
+  for (const u of (await db.select().from(users).where(eq(users.role, role)))) {
+    if (u.active) await sendEmail({ email: u.email, userId: u.id }, subject, body, { positionId });
   }
 }
 
@@ -111,7 +111,7 @@ function notify(role: "hr" | "ed", subject: string, body: string, positionId: nu
 export async function approvalStepAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const user = await assertUser(STAFF_ROLES);
-    const p = load(user, num(fd, "id"));
+    const p = await load(user, num(fd, "id"));
     const step = str(fd, "step");
     const comment = str(fd, "comment");
     const isHr = ["hr", "super_admin"].includes(user.role);
@@ -120,15 +120,15 @@ export async function approvalStepAction(_: ActionState, fd: FormData): Promise<
     let action = step;
 
     if (step === "submit" && ["draft", "returned"].includes(p.approvalStatus)) {
-      const jd = getDoc(p.id, "jd");
+      const jd = await getDoc(p.id, "jd");
       if (!jd?.duties.length || !jd.requiredQualifications.length) return fail("Add duties and required qualifications to the job description before sending it for approval.");
       next = "hr_review";
       action = "submitted";
-      notify("hr", `Position for review: ${p.title}`, `${user.name} sent ${p.code} ${p.title} for HR review.\n\n${comment}`, p.id);
+      await notify("hr", `Position for review: ${p.title}`, `${user.name} sent ${p.code} ${p.title} for HR review.\n\n${comment}`, p.id);
     } else if (step === "hr_approve" && p.approvalStatus === "hr_review" && isHr) {
       next = "ed_review";
       action = "hr_reviewed";
-      notify("ed", `Position for approval: ${p.title}`, `HR reviewed ${p.code} ${p.title} and sent it for your approval.\n\n${comment}`, p.id);
+      await notify("ed", `Position for approval: ${p.title}`, `HR reviewed ${p.code} ${p.title} and sent it for your approval.\n\n${comment}`, p.id);
     } else if (step === "ed_approve" && p.approvalStatus === "ed_review" && isEd) {
       next = "approved";
       action = "ed_approved";
@@ -140,10 +140,10 @@ export async function approvalStepAction(_: ActionState, fd: FormData): Promise<
       return fail("That step isn't available now.");
     }
 
-    db.update(positions).set({ approvalStatus: next, updatedAt: new Date().toISOString() }).where(eq(positions.id, p.id)).run();
-    db.insert(approvals).values({ positionId: p.id, subject: "position", action, comment, userId: user.id }).run();
-    audit(user.id, `position_${action}`, "position", p.id, comment);
-    if (next === "approved") setStage(p.id, 2, user.id, "Position approved");
+    await db.update(positions).set({ approvalStatus: next, updatedAt: new Date().toISOString() }).where(eq(positions.id, p.id));
+    await db.insert(approvals).values({ positionId: p.id, subject: "position", action, comment, userId: user.id });
+    await audit(user.id, `position_${action}`, "position", p.id, comment);
+    if (next === "approved") await setStage(p.id, 2, user.id, "Position approved");
     revalidatePath(`/admin/positions/${p.id}`, "layout");
     revalidatePath("/admin/approvals");
     return done(
@@ -156,14 +156,14 @@ export async function approvalStepAction(_: ActionState, fd: FormData): Promise<
 export async function saveTorsAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const user = await assertUser(["super_admin", "hr", "hiring_lead", "ed"]);
-    const p = load(user, num(fd, "id"));
+    const p = await load(user, num(fd, "id"));
     const note = str(fd, "note");
     const pos = str(fd, "tor_position");
     const com = str(fd, "tor_committee");
-    const posChanged = pos !== (getDoc(p.id, "tor_position")?.body ?? "");
-    const comChanged = com !== (getDoc(p.id, "tor_committee")?.body ?? "");
-    if (posChanged) saveDoc(p.id, "tor_position", { body: pos }, user.id, note);
-    if (comChanged) saveDoc(p.id, "tor_committee", { body: com }, user.id, note);
+    const posChanged = pos !== ((await getDoc(p.id, "tor_position"))?.body ?? "");
+    const comChanged = com !== ((await getDoc(p.id, "tor_committee"))?.body ?? "");
+    if (posChanged) await saveDoc(p.id, "tor_position", { body: pos }, user.id, note);
+    if (comChanged) await saveDoc(p.id, "tor_committee", { body: com }, user.id, note);
     revalidatePath(`/admin/positions/${p.id}/setup`);
     return done(posChanged || comChanged ? "ToRs saved as a new version." : "No changes to save.");
   });
@@ -173,14 +173,14 @@ export async function saveTorsAction(_: ActionState, fd: FormData): Promise<Acti
 export async function saveJdAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const user = await assertUser(["super_admin", "hr", "hiring_lead", "ed"]);
-    const p = load(user, num(fd, "id"));
+    const p = await load(user, num(fd, "id"));
     const templateId = num(fd, "templateId");
     let jd: JdContent;
     if (templateId) {
-      const tpl = db.select().from(jdTemplates).where(eq(jdTemplates.id, templateId)).get();
+      const tpl = (await db.select().from(jdTemplates).where(eq(jdTemplates.id, templateId)))[0];
       if (!tpl) return fail("Template not found.");
       jd = tpl.content;
-      saveDoc(p.id, "jd", jd, user.id, `Replaced with template "${tpl.name}"`);
+      await saveDoc(p.id, "jd", jd, user.id, `Replaced with template "${tpl.name}"`);
     } else {
       jd = {
         summary: str(fd, "summary"),
@@ -192,7 +192,7 @@ export async function saveJdAction(_: ActionState, fd: FormData): Promise<Action
         requiredDocuments: fd.getAll("requiredDocuments").map(String),
       };
       if (!jd.duties.length) return fail("Add at least one duty.");
-      saveDoc(p.id, "jd", jd, user.id, str(fd, "note"));
+      await saveDoc(p.id, "jd", jd, user.id, str(fd, "note"));
     }
     revalidatePath(`/admin/positions/${p.id}/setup`);
     return done("Job description saved as a new version.");
@@ -203,7 +203,7 @@ export async function saveJdAction(_: ActionState, fd: FormData): Promise<Action
 export async function saveCriteriaAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const user = await assertUser(["super_admin", "hr", "hiring_lead", "ed"]);
-    const p = load(user, num(fd, "id"));
+    const p = await load(user, num(fd, "id"));
     let items: Criterion[];
     try {
       items = (JSON.parse(str(fd, "items") || "[]") as Criterion[]).filter((c) => c.label.trim());
@@ -215,11 +215,11 @@ export async function saveCriteriaAction(_: ActionState, fd: FormData): Promise<
       if (c.type === "age" && !c.cutoffDate) return fail(`"${c.label}" needs the cut-off date for the age limit.`);
     }
     const content: CriteriaContent = { items: items.map((c, i) => ({ ...c, key: c.key || `c${i + 1}`, label: c.label.trim() })) };
-    saveDoc(p.id, "criteria", content, user.id, str(fd, "note"));
+    await saveDoc(p.id, "criteria", content, user.id, str(fd, "note"));
     const mode = str(fd, "eligibilityMode") === "block" ? "block" : "flag";
     if (mode !== p.eligibilityMode) {
-      db.update(positions).set({ eligibilityMode: mode }).where(eq(positions.id, p.id)).run();
-      audit(user.id, "eligibility_mode", "position", p.id, mode);
+      await db.update(positions).set({ eligibilityMode: mode }).where(eq(positions.id, p.id));
+      await audit(user.id, "eligibility_mode", "position", p.id, mode);
     }
     revalidatePath(`/admin/positions/${p.id}/setup`);
     return done("Criteria saved as a new version.");
@@ -230,7 +230,7 @@ export async function saveCriteriaAction(_: ActionState, fd: FormData): Promise<
 export async function saveRubricAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const user = await assertUser(["super_admin", "hr", "hiring_lead", "ed"]);
-    const p = load(user, num(fd, "id"));
+    const p = await load(user, num(fd, "id"));
     let rubric: RubricContent;
     try {
       rubric = { ...EMPTY_RUBRIC, ...(JSON.parse(str(fd, "rubric") || "{}") as RubricContent) };
@@ -251,7 +251,7 @@ export async function saveRubricAction(_: ActionState, fd: FormData): Promise<Ac
       if (rubric[round].length && total !== 100) return fail(`The weights for ${round.replace("_", " ")} add up to ${total}. They must add up to 100.`);
       if (rubric[round].some((i) => i.minScore > i.maxScore)) return fail("A minimum score can't be higher than the maximum.");
     }
-    saveDoc(p.id, "rubric", rubric, user.id, str(fd, "note"));
+    await saveDoc(p.id, "rubric", rubric, user.id, str(fd, "note"));
     revalidatePath(`/admin/positions/${p.id}/setup`);
     return done("Rubric saved as a new version.");
   });
@@ -261,11 +261,11 @@ export async function saveRubricAction(_: ActionState, fd: FormData): Promise<Ac
 export async function restoreVersionAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const user = await assertUser(["super_admin", "hr", "hiring_lead", "ed"]);
-    const p = load(user, num(fd, "id"));
+    const p = await load(user, num(fd, "id"));
     const docId = num(fd, "docId");
-    const old = db.query.positionDocs.findFirst({ where: (d, { and, eq: e }) => and(e(d.id, docId), e(d.positionId, p.id)) }).sync();
+    const old = (await db.query.positionDocs.findFirst({ where: (d, { and, eq: e }) => and(e(d.id, docId), e(d.positionId, p.id)) }));
     if (!old) return fail("Version not found.");
-    saveDoc(p.id, old.kind, old.content as never, user.id, `Restored version ${old.version}`);
+    await saveDoc(p.id, old.kind, old.content as never, user.id, `Restored version ${old.version}`);
     revalidatePath(`/admin/positions/${p.id}/setup`);
     return done(`Version ${old.version} restored as the newest version.`);
   });
@@ -274,13 +274,13 @@ export async function restoreVersionAction(_: ActionState, fd: FormData): Promis
 export async function setPositionStatusAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const user = await assertUser(["super_admin", "hr", "ed"]);
-    const p = load(user, num(fd, "id"));
+    const p = await load(user, num(fd, "id"));
     const status = str(fd, "status") as typeof p.status;
     if (!["active", "on_hold", "filled", "withdrawn"].includes(status)) return fail("Unknown status.");
     const reason = str(fd, "reason");
     if (status !== "active" && !reason) return fail("Give a reason.");
-    db.update(positions).set({ status, updatedAt: new Date().toISOString() }).where(eq(positions.id, p.id)).run();
-    audit(user.id, "position_status", "position", p.id, `${status}: ${reason}`);
+    await db.update(positions).set({ status, updatedAt: new Date().toISOString() }).where(eq(positions.id, p.id));
+    await audit(user.id, "position_status", "position", p.id, `${status}: ${reason}`);
     revalidatePath(`/admin/positions/${p.id}`, "layout");
     return done("Status updated.");
   });

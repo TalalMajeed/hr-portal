@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
 import { requireUser } from "@/lib/auth";
 import { saveSettingsAction } from "@/actions/admin";
+import { FROM_ADDRESS, mailConfigured } from "@/lib/email";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { ActionForm } from "@/components/ui/action-form";
@@ -14,7 +15,7 @@ export const metadata: Metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   await requireUser(["super_admin"]);
-  const s = Object.fromEntries(db.select().from(settings).all().map((r) => [r.key, r.value]));
+  const s = Object.fromEntries((await db.select().from(settings)).map((r) => [r.key, r.value]));
   const zoom = !!(process.env.ZOOM_ACCOUNT_ID && process.env.ZOOM_CLIENT_ID && process.env.ZOOM_CLIENT_SECRET);
   return (
     <>
@@ -26,7 +27,7 @@ export default async function SettingsPage() {
             <ActionForm action={saveSettingsAction} className="grid gap-4">
               <FormGrid>
                 <Field label="Largest upload (MB)" htmlFor="max_upload_mb" hint="PDF, JPG and PNG only">
-                  <Input id="max_upload_mb" name="max_upload_mb" type="number" inputMode="numeric" min={1} max={20} defaultValue={s.max_upload_mb ?? "5"} />
+                  <Input id="max_upload_mb" name="max_upload_mb" type="number" inputMode="numeric" min={1} max={4} defaultValue={s.max_upload_mb ?? "4"} />
                 </Field>
                 <Field label="Keep candidate data for (months)" htmlFor="retention_months" hint="DU's retention policy">
                   <Input id="retention_months" name="retention_months" type="number" inputMode="numeric" min={6} max={120} defaultValue={s.retention_months ?? "24"} />
@@ -59,7 +60,7 @@ export default async function SettingsPage() {
             </div>
             <div>
               <p className="font-semibold">Email</p>
-              <p className="text-muted">Emails are kept in the portal record. Connect DU&apos;s mail server to deliver them.</p>
+              <p className="text-muted">{mailConfigured() ? `Delivered through Resend from ${FROM_ADDRESS}, with a copy kept in the record.` : "Not connected. Emails are kept in the portal record but not sent. Set RESEND_API_KEY and MAIL_FROM to deliver them."}</p>
             </div>
             <div>
               <p className="font-semibold">Your data</p>

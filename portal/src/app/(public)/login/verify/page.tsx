@@ -6,7 +6,6 @@ import { AuthCard } from "@/components/layout/auth-card";
 import { ActionForm } from "@/components/ui/action-form";
 import { Field, Input } from "@/components/ui/field";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { DemoOutbox } from "@/components/auth/demo-outbox";
 
 export const metadata: Metadata = { title: "Enter your code" };
 
@@ -23,7 +22,6 @@ export default async function VerifyCodePage({ searchParams }: PageProps<"/login
         </Field>
         <SubmitButton pendingText="Checking…">Continue</SubmitButton>
       </ActionForm>
-      <DemoOutbox email={pending.user.email} templateKey="two_factor_code" />
     </AuthCard>
   );
 }

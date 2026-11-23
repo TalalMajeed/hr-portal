@@ -18,12 +18,12 @@ function pktDate(d: Date) {
  * to the candidate and the panel. Sent keys are stored on the event so nothing goes twice.
  * Returns how many emails were sent.
  */
-export function runDueReminders(now = new Date()) {
-  const due = db
+export async function runDueReminders(now = new Date()) {
+  const due = (await db
     .select()
     .from(events)
     .where(inArray(events.status, ["invited", "confirmed", "reschedule_requested"]))
-    .all()
+    )
     .filter((e) => {
       const t = new Date(e.startsAt).getTime();
       return t > now.getTime() && t - now.getTime() <= 24 * HOUR;
@@ -42,17 +42,17 @@ export function runDueReminders(now = new Date()) {
       if (!done.has("day") && pktDate(now) === pktDate(new Date(e.startsAt))) keys.push("day");
     }
     if (!keys.length) {
-      if (done.size !== e.reminders.length) db.update(events).set({ reminders: [...done] }).where(eq(events.id, e.id)).run();
+      if (done.size !== e.reminders.length) await db.update(events).set({ reminders: [...done] }).where(eq(events.id, e.id));
       continue;
     }
-    const r = loadEvent(e.id);
+    const r = await loadEvent(e.id);
     if (!r) continue;
     // Send one email per run: the closest reminder that is due.
     const key = keys.includes("1h") ? "1h" : keys.includes("day") ? "day" : "24h";
     const relative = key === "1h" ? "in one hour" : key === "day" ? "today" : "tomorrow";
     const base = { position: r.position.title, when_relative: relative, venue_or_link: eventLocationText(e) };
     if (!isPlaceholder(r.candidate.email)) {
-      sendTemplate(
+      await sendTemplate(
         "event_reminder",
         { email: r.candidate.email, userId: r.candidate.id },
         { ...base, name: r.candidate.name, session: sessionLabel(e.round), when: formatDual(e.startsAt, r.tz) },
@@ -60,8 +60,8 @@ export function runDueReminders(now = new Date()) {
       );
       sent += 1;
     }
-    for (const m of eventPanelists(e)) {
-      sendTemplate(
+    for (const m of await eventPanelists(e)) {
+      await sendTemplate(
         "event_reminder",
         { email: m.user.email, userId: m.user.id },
         { ...base, name: m.user.name, session: `${sessionLabel(e.round)} with ${r.candidate.name}`, when: `${formatDateTime(e.startsAt)} PKT` },
@@ -70,7 +70,7 @@ export function runDueReminders(now = new Date()) {
       sent += 1;
     }
     for (const k of keys) done.add(k);
-    db.update(events).set({ reminders: [...done] }).where(eq(events.id, e.id)).run();
+    await db.update(events).set({ reminders: [...done] }).where(eq(events.id, e.id));
   }
   return sent;
 }

@@ -20,16 +20,16 @@ const MANAGERS = STAFF_ROLES;
 const PROVIDERS: MeetingProvider[] = ["zoom", "meet", "teams"];
 const ACTIVE = ["invited", "confirmed", "reschedule_requested", "completed"] as const;
 
-function positionFor(user: SessionUser, positionId: number) {
-  const p = db.select().from(positions).where(eq(positions.id, positionId)).get();
+async function positionFor(user: SessionUser, positionId: number) {
+  const p = (await db.select().from(positions).where(eq(positions.id, positionId)))[0];
   if (!p || !canManagePosition(user, p)) throw new Error("You can't manage this position.");
   return p;
 }
 
-function eventFor(user: SessionUser, eventId: number) {
-  const e = db.select().from(events).where(eq(events.id, eventId)).get();
+async function eventFor(user: SessionUser, eventId: number) {
+  const e = (await db.select().from(events).where(eq(events.id, eventId)))[0];
   if (!e) throw new Error("That session no longer exists.");
-  const position = positionFor(user, e.positionId);
+  const position = await positionFor(user, e.positionId);
   return { e, position };
 }
 
@@ -45,10 +45,10 @@ function refresh(positionId: number, applicationId?: number) {
 export async function createEventAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const user = await assertUser(MANAGERS);
-    const position = positionFor(user, num(fd, "positionId"));
+    const position = await positionFor(user, num(fd, "positionId"));
     const round = str(fd, "round") as PanelRound;
     if (!PANEL_ROUNDS.includes(round)) return fail("Choose the type of session.");
-    const app = db.select().from(applications).where(and(eq(applications.id, num(fd, "applicationId")), eq(applications.positionId, position.id))).get();
+    const app = (await db.select().from(applications).where(and(eq(applications.id, num(fd, "applicationId")), eq(applications.positionId, position.id))))[0];
     if (!app) return fail("Choose a candidate.", { applicationId: "Required" });
     if (["withdrawn", "not_selected", "draft"].includes(app.status)) return fail("This candidate is no longer in the process.");
 
@@ -56,23 +56,23 @@ export async function createEventAction(_: ActionState, fd: FormData): Promise<A
       return fail("Only shortlisted or reserve candidates can be invited to interview.");
     }
     if (round !== "interview") {
-      const hadInterview = db
+      const hadInterview = (await db
         .select()
         .from(events)
         .where(and(eq(events.applicationId, app.id), eq(events.round, "interview"), inArray(events.status, [...ACTIVE])))
-        .get();
+        )[0];
       if (!hadInterview) return fail(`${ROUND_LABELS[round]} is for candidates from round one. Schedule an interview first.`);
     }
-    const clash = db
+    const clash = (await db
       .select()
       .from(events)
       .where(and(eq(events.applicationId, app.id), eq(events.round, round), inArray(events.status, ["invited", "confirmed", "reschedule_requested"])))
-      .get();
+      )[0];
     if (clash) return fail(`This candidate already has an open ${sessionLabel(round)}. Reschedule that one instead.`);
 
     let panelId: number | null = num(fd, "panelId") || null;
     if (panelId) {
-      const panel = db.select().from(panels).where(and(eq(panels.id, panelId), eq(panels.positionId, position.id))).get();
+      const panel = (await db.select().from(panels).where(and(eq(panels.id, panelId), eq(panels.positionId, position.id))))[0];
       if (!panel) panelId = null;
     }
 
@@ -80,7 +80,7 @@ export async function createEventAction(_: ActionState, fd: FormData): Promise<A
     let durationMin = Math.min(240, Math.max(10, num(fd, "durationMin", round === "talk" ? 30 : 45)));
     const slotId = num(fd, "slotId");
     if (slotId) {
-      const slot = db.select().from(panelSlots).where(eq(panelSlots.id, slotId)).get();
+      const slot = (await db.select().from(panelSlots).where(eq(panelSlots.id, slotId)))[0];
       if (!slot) return fail("That slot is no longer available.");
       startsAt = slot.startsAt;
       if (!str(fd, "durationMin")) durationMin = slot.durationMin;
@@ -98,14 +98,14 @@ export async function createEventAction(_: ActionState, fd: FormData): Promise<A
     if (round === "talk" && !topic) return fail("Enter the talk topic.", { topic: "Required" });
     if (round === "second_round" && !brief) return fail("Enter the presentation brief.", { brief: "Required" });
 
-    const cand = db.select().from(users).where(eq(users.id, app.candidateId)).get()!;
+    const cand = (await db.select().from(users).where(eq(users.id, app.candidateId)))[0]!;
     let meeting = { provider: "" as MeetingProvider | "", url: "", id: "", passcode: "", waitingRoom: true, simulated: false };
     if (mode === "online") {
       const provider = (PROVIDERS.includes(str(fd, "provider") as MeetingProvider) ? str(fd, "provider") : "zoom") as MeetingProvider;
       meeting = await createMeeting({ provider, topic: `${ROUND_LABELS[round]}: ${position.title} (${cand.name})`, startsAt, durationMin });
     }
 
-    const row = db
+    const row = (await db
       .insert(events)
       .values({
         positionId: position.id,
@@ -128,11 +128,11 @@ export async function createEventAction(_: ActionState, fd: FormData): Promise<A
         status: "invited",
       })
       .returning()
-      .get();
-    audit(user.id, "event_scheduled", "event", row.id, `${round} for ${app.appNo} at ${startsAt}${meeting.simulated ? " (simulated meeting link)" : ""}`);
-    sendEventInvite(row.id);
-    setApplicationStatus(app.id, round === "interview" ? "interview_scheduled" : "talk_scheduled", user.id, { notify: false, note: `${ROUND_LABELS[round]} invitation sent` });
-    setStage(position.id, round === "interview" ? 7 : 8, user.id, `${ROUND_LABELS[round]} scheduled`);
+      )[0];
+    await audit(user.id, "event_scheduled", "event", row.id, `${round} for ${app.appNo} at ${startsAt}${meeting.simulated ? " (simulated meeting link)" : ""}`);
+    await sendEventInvite(row.id);
+    await setApplicationStatus(app.id, round === "interview" ? "interview_scheduled" : "talk_scheduled", user.id, { notify: false, note: `${ROUND_LABELS[round]} invitation sent` });
+    await setStage(position.id, round === "interview" ? 7 : 8, user.id, `${ROUND_LABELS[round]} scheduled`);
     refresh(position.id, app.id);
     return done(
       `${ROUND_LABELS[round]} scheduled for ${cand.name} on ${formatDateTime(startsAt)} PKT. ${isPlaceholder(cand.email) ? "This candidate came through an agency, so contact them directly." : "The invitation has been emailed."}${meeting.simulated ? " The meeting link is simulated because no Zoom account is connected." : ""}`,
@@ -144,18 +144,18 @@ export async function createEventAction(_: ActionState, fd: FormData): Promise<A
 export async function rescheduleEventAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const user = await assertUser(MANAGERS);
-    const { e, position } = eventFor(user, num(fd, "eventId"));
+    const { e, position } = await eventFor(user, num(fd, "eventId"));
     if (["cancelled", "completed", "declined"].includes(e.status)) return fail("This session can't be moved any more. Schedule a new one.");
     const startsAt = pktInputToIso(str(fd, "startsAt"));
     if (!startsAt) return fail("Enter the new date and time.");
     if (new Date(startsAt).getTime() < Date.now()) return fail("Choose a time in the future.");
     const reason = str(fd, "reason");
-    db.update(events)
+    await db.update(events)
       .set({ startsAt, status: "invited", reminders: [], updatedAt: new Date().toISOString(), durationMin: num(fd, "durationMin", e.durationMin) || e.durationMin })
       .where(eq(events.id, e.id))
-      .run();
-    audit(user.id, "event_rescheduled", "event", e.id, `${e.startsAt} to ${startsAt}${reason ? `: ${reason}` : ""}`);
-    sendRescheduleNotices(e.id);
+      ;
+    await audit(user.id, "event_rescheduled", "event", e.id, `${e.startsAt} to ${startsAt}${reason ? `: ${reason}` : ""}`);
+    await sendRescheduleNotices(e.id);
     refresh(position.id, e.applicationId);
     return done(`Moved to ${formatDateTime(startsAt)} PKT. The candidate and panel have been told.`);
   });
@@ -165,28 +165,28 @@ export async function rescheduleEventAction(_: ActionState, fd: FormData): Promi
 export async function setEventStatusAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const user = await assertUser(MANAGERS);
-    const { e, position } = eventFor(user, num(fd, "eventId"));
+    const { e, position } = await eventFor(user, num(fd, "eventId"));
     const to = str(fd, "status");
     if (!["confirmed", "completed", "cancelled"].includes(to)) return fail("Unknown status.");
-    db.update(events)
+    await db.update(events)
       .set({ status: to as "confirmed", updatedAt: new Date().toISOString() })
       .where(eq(events.id, e.id))
-      .run();
-    audit(user.id, `event_${to}`, "event", e.id);
+      ;
+    await audit(user.id, `event_${to}`, "event", e.id);
     if (to === "cancelled") {
-      const r = loadEvent(e.id);
+      const r = await loadEvent(e.id);
       if (r) {
         const subject = `Cancelled: ${sessionLabel(e.round)} for ${r.position.title}`;
         if (!isPlaceholder(r.candidate.email)) {
-          sendEmail(
+          await sendEmail(
             { email: r.candidate.email, userId: r.candidate.id },
             subject,
             `Dear ${r.candidate.name},\n\nYour ${sessionLabel(e.round)} on ${formatDateTime(e.startsAt)} PKT has been cancelled. HR will be in touch about next steps.\n\nDU Human Resources`,
             { applicationId: e.applicationId, positionId: position.id },
           );
         }
-        for (const m of eventPanelists(e)) {
-          sendEmail({ email: m.user.email, userId: m.user.id }, subject, `Dear ${m.user.name},\n\nThe ${sessionLabel(e.round)} with ${r.candidate.name} on ${formatDateTime(e.startsAt)} PKT has been cancelled.\n\nDU Human Resources`, {
+        for (const m of await eventPanelists(e)) {
+          await sendEmail({ email: m.user.email, userId: m.user.id }, subject, `Dear ${m.user.name},\n\nThe ${sessionLabel(e.round)} with ${r.candidate.name} on ${formatDateTime(e.startsAt)} PKT has been cancelled.\n\nDU Human Resources`, {
             applicationId: e.applicationId,
             positionId: position.id,
           });
@@ -202,16 +202,16 @@ export async function setEventStatusAction(_: ActionState, fd: FormData): Promis
 export async function newMeetingLinkAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const user = await assertUser(MANAGERS);
-    const { e, position } = eventFor(user, num(fd, "eventId"));
+    const { e, position } = await eventFor(user, num(fd, "eventId"));
     const provider = (PROVIDERS.includes(str(fd, "provider") as MeetingProvider) ? str(fd, "provider") : "zoom") as MeetingProvider;
-    const r = loadEvent(e.id)!;
+    const r = (await loadEvent(e.id))!;
     const m = await createMeeting({ provider, topic: `${ROUND_LABELS[e.round]}: ${position.title} (${r.candidate.name})`, startsAt: e.startsAt, durationMin: e.durationMin });
-    db.update(events)
+    await db.update(events)
       .set({ mode: "online", meetingProvider: m.provider, meetingUrl: m.url, meetingId: m.id, passcode: m.passcode, waitingRoom: m.waitingRoom, updatedAt: new Date().toISOString() })
       .where(eq(events.id, e.id))
-      .run();
-    audit(user.id, "meeting_link_created", "event", e.id, `${m.provider}${m.simulated ? " (simulated)" : ""}`);
-    sendRescheduleNotices(e.id);
+      ;
+    await audit(user.id, "meeting_link_created", "event", e.id, `${m.provider}${m.simulated ? " (simulated)" : ""}`);
+    await sendRescheduleNotices(e.id);
     refresh(position.id, e.applicationId);
     return done(`New ${provider === "zoom" ? "Zoom" : provider === "meet" ? "Google Meet" : "Teams"} link created and sent.${m.simulated ? " It is simulated because no account is connected." : ""}`);
   });

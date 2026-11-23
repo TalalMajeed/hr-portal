@@ -15,7 +15,7 @@ export async function uploadAgencyCandidateAction(_: ActionState, fd: FormData):
   return safe(async () => {
     const agency = await assertUser(["agency"]);
     const positionId = Number(str(fd, "positionId"));
-    const advert = db.select().from(adverts).where(eq(adverts.positionId, positionId)).get();
+    const advert = (await db.select().from(adverts).where(eq(adverts.positionId, positionId)))[0];
     if (!advertIsOpen(advert)) return fail("This position is closed to new candidates.");
     const name = str(fd, "name");
     const phone = str(fd, "phone");

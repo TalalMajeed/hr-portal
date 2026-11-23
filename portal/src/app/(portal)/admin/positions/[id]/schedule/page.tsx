@@ -23,15 +23,15 @@ export default async function SchedulePage({ params }: PageProps<"/admin/positio
   const { id } = await params;
   const position = await positionForPage(user, id);
 
-  const apps = db
+  const apps = (await db
     .select({ app: applications, candidate: users, tz: candidateProfiles.timezone })
     .from(applications)
     .innerJoin(users, eq(users.id, applications.candidateId))
     .leftJoin(candidateProfiles, eq(candidateProfiles.userId, users.id))
     .where(eq(applications.positionId, position.id))
-    .all();
-  const evs = db.select().from(events).where(eq(events.positionId, position.id)).orderBy(asc(events.startsAt)).all();
-  const panelRows = db.select().from(panels).where(eq(panels.positionId, position.id)).orderBy(asc(panels.id)).all();
+    );
+  const evs = (await db.select().from(events).where(eq(events.positionId, position.id)).orderBy(asc(events.startsAt)));
+  const panelRows = (await db.select().from(panels).where(eq(panels.positionId, position.id)).orderBy(asc(panels.id)));
 
   const rounds: PanelRound[] = position.type === "faculty" ? ["interview", "talk", "second_round"] : ["interview", "second_round"];
   const candidates: ScheduleCandidate[] = apps
@@ -45,15 +45,15 @@ export default async function SchedulePage({ params }: PageProps<"/admin/positio
     })
     .filter((c) => c.rounds.length);
 
-  const schedPanels: SchedulePanel[] = panelRows.map((p) => {
-    const accepted = db
+  const schedPanels: SchedulePanel[] = await Promise.all(panelRows.map(async (p) => {
+    const accepted = (await db
       .select({ userId: panelMembers.userId })
       .from(panelMembers)
       .where(and(eq(panelMembers.panelId, p.id), eq(panelMembers.inviteStatus, "accepted")))
-      .all()
+      )
       .map((m) => m.userId);
-    const slots = db.select().from(panelSlots).where(eq(panelSlots.panelId, p.id)).orderBy(asc(panelSlots.startsAt)).all().filter((s) => !isPast(s.startsAt));
-    const marks = slots.length ? db.select().from(panelAvailability).where(inArray(panelAvailability.slotId, slots.map((s) => s.id))).all() : [];
+    const slots = (await db.select().from(panelSlots).where(eq(panelSlots.panelId, p.id)).orderBy(asc(panelSlots.startsAt))).filter((s) => !isPast(s.startsAt));
+    const marks = slots.length ? (await db.select().from(panelAvailability).where(inArray(panelAvailability.slotId, slots.map((s) => s.id)))) : [];
     return {
       id: p.id,
       round: p.round,
@@ -68,7 +68,7 @@ export default async function SchedulePage({ params }: PageProps<"/admin/positio
         taken: evs.some((e) => e.panelId === p.id && e.startsAt === s.startsAt && !["cancelled", "declined"].includes(e.status)),
       })),
     };
-  });
+  }));
 
   const items: (EventItem & { round: PanelRound })[] = evs.map((e) => {
     const a = apps.find((x) => x.app.id === e.applicationId)!;

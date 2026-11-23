@@ -15,14 +15,14 @@ export const metadata: Metadata = { title: "Open positions" };
 
 export default async function AgencyHome() {
   const user = await requireUser(["agency"]);
-  const open = db
+  const open = (await db
     .select({ p: positions, a: adverts })
     .from(adverts)
     .innerJoin(positions, eq(positions.id, adverts.positionId))
     .where(and(eq(adverts.status, "published"), gt(adverts.closingAt, new Date().toISOString())))
     .orderBy(asc(adverts.closingAt))
-    .all();
-  const mine = db.select({ positionId: applications.positionId }).from(applications).where(eq(applications.agencyId, user.id)).all();
+    );
+  const mine = (await db.select({ positionId: applications.positionId }).from(applications).where(eq(applications.agencyId, user.id)));
   const countFor = (id: number) => mine.filter((m) => m.positionId === id).length;
 
   return (

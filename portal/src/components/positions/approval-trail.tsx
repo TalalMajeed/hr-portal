@@ -13,14 +13,14 @@ const ACTIONS: Record<string, { label: string; tone: Tone }> = {
 };
 
 /** A2: every approval step, time-stamped, with its comment. */
-export function ApprovalTrail({ positionId, subject }: { positionId: number; subject: "position" | "advert" | "shortlist" | "panel" }) {
-  const rows = db
+export async function ApprovalTrail({ positionId, subject }: { positionId: number; subject: "position" | "advert" | "shortlist" | "panel" }) {
+  const rows = (await db
     .select({ a: approvals, name: users.name, role: users.role })
     .from(approvals)
     .leftJoin(users, eq(users.id, approvals.userId))
     .where(and(eq(approvals.positionId, positionId), eq(approvals.subject, subject)))
     .orderBy(asc(approvals.createdAt), asc(approvals.id))
-    .all();
+    );
   if (!rows.length) return <p className="text-muted">No steps yet.</p>;
   return (
     <ol className="grid gap-4 border-l-2 border-line pl-4">

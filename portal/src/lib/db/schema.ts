@@ -1,7 +1,10 @@
-import { sqliteTable, text, integer, uniqueIndex, index } from "drizzle-orm/sqlite-core";
+import { pgTable, text, integer, boolean, jsonb, uniqueIndex, index, customType } from "drizzle-orm/pg-core";
+
+/** Raw file bytes. Uploads live in the database so they survive serverless deploys. */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
 
 const now = () => new Date().toISOString();
-const id = () => integer("id").primaryKey({ autoIncrement: true });
+const id = () => integer("id").primaryKey().generatedByDefaultAsIdentity();
 const createdAt = () => text("created_at").notNull().$defaultFn(now);
 
 /* ------------------------------------------------------------------ */
@@ -113,7 +116,7 @@ export type ProfileSnapshot = {
 /* Users, auth, audit                                                  */
 /* ------------------------------------------------------------------ */
 
-export const users = sqliteTable(
+export const users = pgTable(
   "users",
   {
     id: id(),
@@ -127,20 +130,20 @@ export const users = sqliteTable(
     department: text("department").notNull().default(""),
     discipline: text("discipline").notNull().default(""),
     /** External reviewers and panelists work through a secure link, without a password. */
-    external: integer("external", { mode: "boolean" }).notNull().default(false),
+    external: boolean("external").notNull().default(false),
     accessToken: text("access_token"),
-    emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
+    emailVerified: boolean("email_verified").notNull().default(false),
     verifyToken: text("verify_token"),
     resetToken: text("reset_token"),
     resetExpires: text("reset_expires"),
-    twoFactorEnabled: integer("two_factor_enabled", { mode: "boolean" }).notNull().default(false),
-    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
+    active: boolean("active").notNull().default(true),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("users_email_idx").on(t.email), index("users_role_idx").on(t.role)],
 );
 
-export const authSessions = sqliteTable("auth_sessions", {
+export const authSessions = pgTable("auth_sessions", {
   id: text("id").primaryKey(),
   userId: integer("user_id").notNull().references(() => users.id),
   expiresAt: text("expires_at").notNull(),
@@ -150,7 +153,7 @@ export const authSessions = sqliteTable("auth_sessions", {
 });
 
 /** Append-only. Database triggers block UPDATE and DELETE. */
-export const auditLog = sqliteTable(
+export const auditLog = pgTable(
   "audit_log",
   {
     id: id(),
@@ -164,7 +167,7 @@ export const auditLog = sqliteTable(
   (t) => [index("audit_entity_idx").on(t.entity, t.entityId)],
 );
 
-export const settings = sqliteTable("settings", {
+export const settings = pgTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
@@ -173,7 +176,7 @@ export const settings = sqliteTable("settings", {
 /* Positions, ToRs, JD, criteria, rubric (A)                           */
 /* ------------------------------------------------------------------ */
 
-export const positions = sqliteTable("positions", {
+export const positions = pgTable("positions", {
   id: id(),
   code: text("code").notNull().unique(),
   title: text("title").notNull(),
@@ -195,7 +198,7 @@ export const positions = sqliteTable("positions", {
   status: text("status").$type<PositionStatus>().notNull().default("active"),
   /** C6: block ineligible applications, or let them through flagged. */
   eligibilityMode: text("eligibility_mode").$type<"block" | "flag">().notNull().default("flag"),
-  shortlistApproved: integer("shortlist_approved", { mode: "boolean" }).notNull().default(false),
+  shortlistApproved: boolean("shortlist_approved").notNull().default(false),
   hiringLeadId: integer("hiring_lead_id").references(() => users.id),
   createdBy: integer("created_by").references(() => users.id),
   createdAt: createdAt(),
@@ -203,14 +206,14 @@ export const positions = sqliteTable("positions", {
 });
 
 /** Versioned ToRs, JD, criteria and rubric (A3, A4, A6, A7, A8). The current version is the highest. */
-export const positionDocs = sqliteTable(
+export const positionDocs = pgTable(
   "position_docs",
   {
     id: id(),
     positionId: integer("position_id").notNull().references(() => positions.id),
     kind: text("kind").$type<DocKind>().notNull(),
     version: integer("version").notNull(),
-    content: text("content", { mode: "json" }).notNull(),
+    content: jsonb("content").notNull(),
     note: text("note").notNull().default(""),
     createdBy: integer("created_by").references(() => users.id),
     createdAt: createdAt(),
@@ -218,16 +221,16 @@ export const positionDocs = sqliteTable(
   (t) => [uniqueIndex("position_docs_version_idx").on(t.positionId, t.kind, t.version)],
 );
 
-export const jdTemplates = sqliteTable("jd_templates", {
+export const jdTemplates = pgTable("jd_templates", {
   id: id(),
   name: text("name").notNull(),
   type: text("type").$type<PositionType>().notNull(),
-  content: text("content", { mode: "json" }).$type<JdContent>().notNull(),
+  content: jsonb("content").$type<JdContent>().notNull(),
   createdAt: createdAt(),
 });
 
 /** Approvals and sign-offs for positions, adverts, shortlists and panels (A2, D7). */
-export const approvals = sqliteTable(
+export const approvals = pgTable(
   "approvals",
   {
     id: id(),
@@ -242,7 +245,7 @@ export const approvals = sqliteTable(
 );
 
 /** Stage changes, extensions, re-advertising and withdrawals (B7, I5). */
-export const positionEvents = sqliteTable(
+export const positionEvents = pgTable(
   "position_events",
   {
     id: id(),
@@ -263,21 +266,21 @@ export const positionEvents = sqliteTable(
 
 export type AdvertStatus = "draft" | "pending_approval" | "published" | "unpublished" | "closed" | "archived";
 
-export const adverts = sqliteTable("adverts", {
+export const adverts = pgTable("adverts", {
   id: id(),
   positionId: integer("position_id").notNull().unique().references(() => positions.id),
   body: text("body").notNull(),
   status: text("status").$type<AdvertStatus>().notNull().default("draft"),
   closingAt: text("closing_at").notNull(),
   publishedAt: text("published_at"),
-  questions: text("questions", { mode: "json" }).$type<AdvertQuestion[]>().notNull().default([]),
-  extraUploads: text("extra_uploads", { mode: "json" }).$type<AdvertUpload[]>().notNull().default([]),
+  questions: jsonb("questions").$type<AdvertQuestion[]>().notNull().default([]),
+  extraUploads: jsonb("extra_uploads").$type<AdvertUpload[]>().notNull().default([]),
   createdAt: createdAt(),
   updatedAt: text("updated_at").notNull().$defaultFn(now),
 });
 
 /** Where and when each ad ran (B5). */
-export const advertRuns = sqliteTable("advert_runs", {
+export const advertRuns = pgTable("advert_runs", {
   id: id(),
   positionId: integer("position_id").notNull().references(() => positions.id),
   channel: text("channel").notNull(),
@@ -291,7 +294,7 @@ export const advertRuns = sqliteTable("advert_runs", {
 /* Candidates and applications (C)                                     */
 /* ------------------------------------------------------------------ */
 
-export const candidateProfiles = sqliteTable("candidate_profiles", {
+export const candidateProfiles = pgTable("candidate_profiles", {
   id: id(),
   userId: integer("user_id").notNull().unique().references(() => users.id),
   cnic: text("cnic").notNull().default(""),
@@ -303,10 +306,10 @@ export const candidateProfiles = sqliteTable("candidate_profiles", {
   city: text("city").notNull().default(""),
   country: text("country").notNull().default("Pakistan"),
   timezone: text("timezone").notNull().default("Asia/Karachi"),
-  education: text("education", { mode: "json" }).$type<Education[]>().notNull().default([]),
-  experience: text("experience", { mode: "json" }).$type<Experience[]>().notNull().default([]),
-  publications: text("publications", { mode: "json" }).$type<Publication[]>().notNull().default([]),
-  references: text("references", { mode: "json" }).$type<Reference[]>().notNull().default([]),
+  education: jsonb("education").$type<Education[]>().notNull().default([]),
+  experience: jsonb("experience").$type<Experience[]>().notNull().default([]),
+  publications: jsonb("publications").$type<Publication[]>().notNull().default([]),
+  references: jsonb("references").$type<Reference[]>().notNull().default([]),
   researchInterests: text("research_interests").notNull().default(""),
   updatedAt: text("updated_at").notNull().$defaultFn(now),
 });
@@ -325,7 +328,7 @@ export type DocumentKind =
   | "minutes"
   | "board_attachment";
 
-export const documents = sqliteTable(
+export const documents = pgTable(
   "documents",
   {
     id: id(),
@@ -345,7 +348,15 @@ export const documents = sqliteTable(
   (t) => [index("documents_owner_idx").on(t.ownerUserId), index("documents_application_idx").on(t.applicationId)],
 );
 
-export const applications = sqliteTable(
+/** The bytes of each uploaded document, kept apart so listing documents stays light. */
+export const documentFiles = pgTable("document_files", {
+  documentId: integer("document_id")
+    .primaryKey()
+    .references(() => documents.id, { onDelete: "cascade" }),
+  data: bytea("data").notNull(),
+});
+
+export const applications = pgTable(
   "applications",
   {
     id: id(),
@@ -357,17 +368,17 @@ export const applications = sqliteTable(
     status: text("status").$type<ApplicationStatus>().notNull().default("draft"),
     listStatus: text("list_status").$type<ListStatus>().notNull().default("pending"),
     listReason: text("list_reason").notNull().default(""),
-    eligibility: text("eligibility", { mode: "json" }).$type<EligibilityResult | null>(),
+    eligibility: jsonb("eligibility").$type<EligibilityResult | null>(),
     eligibilityOverride: text("eligibility_override").$type<"met" | "not_met" | null>(),
     overrideReason: text("override_reason").notNull().default(""),
     /** C3 statements and C5 post-specific answers, keyed by question key. */
-    answers: text("answers", { mode: "json" }).$type<Record<string, string>>().notNull().default({}),
+    answers: jsonb("answers").$type<Record<string, string>>().notNull().default({}),
     /** C8: the profile as it was at submission. */
-    snapshot: text("snapshot", { mode: "json" }).$type<ProfileSnapshot | null>(),
-    consent: integer("consent", { mode: "boolean" }).notNull().default(false),
+    snapshot: jsonb("snapshot").$type<ProfileSnapshot | null>(),
+    consent: boolean("consent").notNull().default(false),
     duplicateOfId: integer("duplicate_of_id"),
     rejectionReason: text("rejection_reason").notNull().default(""),
-    shareRejectionReason: integer("share_rejection_reason", { mode: "boolean" }).notNull().default(false),
+    shareRejectionReason: boolean("share_rejection_reason").notNull().default(false),
     submittedAt: text("submitted_at"),
     withdrawnAt: text("withdrawn_at"),
     createdAt: createdAt(),
@@ -379,7 +390,7 @@ export const applications = sqliteTable(
   ],
 );
 
-export const applicationStatusHistory = sqliteTable(
+export const applicationStatusHistory = pgTable(
   "application_status_history",
   {
     id: id(),
@@ -394,7 +405,7 @@ export const applicationStatusHistory = sqliteTable(
 );
 
 /** D6: never shown to the candidate. */
-export const applicationNotes = sqliteTable("application_notes", {
+export const applicationNotes = pgTable("application_notes", {
   id: id(),
   applicationId: integer("application_id").notNull().references(() => applications.id),
   userId: integer("user_id").notNull().references(() => users.id),
@@ -403,7 +414,7 @@ export const applicationNotes = sqliteTable("application_notes", {
 });
 
 /** C9: documents HR asks for after submission. */
-export const documentRequests = sqliteTable("document_requests", {
+export const documentRequests = pgTable("document_requests", {
   id: id(),
   applicationId: integer("application_id").notNull().references(() => applications.id),
   label: text("label").notNull(),
@@ -416,13 +427,13 @@ export const documentRequests = sqliteTable("document_requests", {
 /* Shortlisting (D)                                                    */
 /* ------------------------------------------------------------------ */
 
-export const reviewAssignments = sqliteTable(
+export const reviewAssignments = pgTable(
   "review_assignments",
   {
     id: id(),
     applicationId: integer("application_id").notNull().references(() => applications.id),
     reviewerId: integer("reviewer_id").notNull().references(() => users.id),
-    scores: text("scores", { mode: "json" }).$type<Scores>().notNull().default({}),
+    scores: jsonb("scores").$type<Scores>().notNull().default({}),
     remarks: text("remarks").notNull().default(""),
     submittedAt: text("submitted_at"),
     assignedBy: integer("assigned_by").references(() => users.id),
@@ -437,7 +448,7 @@ export const reviewAssignments = sqliteTable(
 
 export type PanelRound = "interview" | "talk" | "second_round";
 
-export const panels = sqliteTable("panels", {
+export const panels = pgTable("panels", {
   id: id(),
   positionId: integer("position_id").notNull().references(() => positions.id),
   round: text("round").$type<PanelRound>().notNull(),
@@ -446,13 +457,13 @@ export const panels = sqliteTable("panels", {
   createdAt: createdAt(),
 });
 
-export const panelMembers = sqliteTable(
+export const panelMembers = pgTable(
   "panel_members",
   {
     id: id(),
     panelId: integer("panel_id").notNull().references(() => panels.id),
     userId: integer("user_id").notNull().references(() => users.id),
-    isChair: integer("is_chair", { mode: "boolean" }).notNull().default(false),
+    isChair: boolean("is_chair").notNull().default(false),
     inviteStatus: text("invite_status").$type<"not_sent" | "pending" | "accepted" | "declined" | "replaced">().notNull().default("not_sent"),
     invitedAt: text("invited_at"),
     respondedAt: text("responded_at"),
@@ -465,33 +476,33 @@ export const panelMembers = sqliteTable(
 );
 
 /** E4: candidate slots offered to the panel for the availability poll. Times are UTC ISO. */
-export const panelSlots = sqliteTable("panel_slots", {
+export const panelSlots = pgTable("panel_slots", {
   id: id(),
   panelId: integer("panel_id").notNull().references(() => panels.id),
   startsAt: text("starts_at").notNull(),
   durationMin: integer("duration_min").notNull().default(45),
 });
 
-export const panelAvailability = sqliteTable(
+export const panelAvailability = pgTable(
   "panel_availability",
   {
     id: id(),
     slotId: integer("slot_id").notNull().references(() => panelSlots.id),
     userId: integer("user_id").notNull().references(() => users.id),
-    available: integer("available", { mode: "boolean" }).notNull(),
+    available: boolean("available").notNull(),
   },
   (t) => [uniqueIndex("panel_availability_unique_idx").on(t.slotId, t.userId)],
 );
 
 /** E5: one declaration per panel member per candidate. */
-export const conflicts = sqliteTable(
+export const conflicts = pgTable(
   "conflicts",
   {
     id: id(),
     panelId: integer("panel_id").notNull().references(() => panels.id),
     userId: integer("user_id").notNull().references(() => users.id),
     applicationId: integer("application_id").notNull().references(() => applications.id),
-    hasConflict: integer("has_conflict", { mode: "boolean" }).notNull(),
+    hasConflict: boolean("has_conflict").notNull(),
     note: text("note").notNull().default(""),
     createdAt: createdAt(),
   },
@@ -504,7 +515,7 @@ export const conflicts = sqliteTable(
 
 export type EventStatus = "invited" | "confirmed" | "declined" | "reschedule_requested" | "cancelled" | "completed";
 
-export const events = sqliteTable(
+export const events = pgTable(
   "events",
   {
     id: id(),
@@ -520,7 +531,7 @@ export const events = sqliteTable(
     meetingUrl: text("meeting_url").notNull().default(""),
     meetingId: text("meeting_id").notNull().default(""),
     passcode: text("passcode").notNull().default(""),
-    waitingRoom: integer("waiting_room", { mode: "boolean" }).notNull().default(true),
+    waitingRoom: boolean("waiting_room").notNull().default(true),
     prepNote: text("prep_note").notNull().default(""),
     // F7 faculty talk
     topic: text("topic").notNull().default(""),
@@ -529,7 +540,7 @@ export const events = sqliteTable(
     brief: text("brief").notNull().default(""),
     status: text("status").$type<EventStatus>().notNull().default("invited"),
     candidateNote: text("candidate_note").notNull().default(""),
-    reminders: text("reminders", { mode: "json" }).$type<string[]>().notNull().default([]),
+    reminders: jsonb("reminders").$type<string[]>().notNull().default([]),
     createdAt: createdAt(),
     updatedAt: text("updated_at").notNull().$defaultFn(now),
   },
@@ -542,7 +553,7 @@ export const events = sqliteTable(
 
 export type Recommendation = "recommend" | "recommend_with_reservation" | "not_recommend";
 
-export const evaluations = sqliteTable(
+export const evaluations = pgTable(
   "evaluations",
   {
     id: id(),
@@ -550,7 +561,7 @@ export const evaluations = sqliteTable(
     applicationId: integer("application_id").notNull().references(() => applications.id),
     panelistId: integer("panelist_id").notNull().references(() => users.id),
     round: text("round").$type<PanelRound>().notNull(),
-    scores: text("scores", { mode: "json" }).$type<Scores>().notNull().default({}),
+    scores: jsonb("scores").$type<Scores>().notNull().default({}),
     strengths: text("strengths").notNull().default(""),
     concerns: text("concerns").notNull().default(""),
     recommendation: text("recommendation").$type<Recommendation | "">().notNull().default(""),
@@ -563,14 +574,14 @@ export const evaluations = sqliteTable(
 );
 
 /** G6: panel consensus and the chair's ranked recommendation. */
-export const consensus = sqliteTable(
+export const consensus = pgTable(
   "consensus",
   {
     id: id(),
     positionId: integer("position_id").notNull().references(() => positions.id),
     round: text("round").$type<PanelRound>().notNull(),
     note: text("note").notNull().default(""),
-    ranking: text("ranking", { mode: "json" }).$type<number[]>().notNull().default([]),
+    ranking: jsonb("ranking").$type<number[]>().notNull().default([]),
     chairId: integer("chair_id").references(() => users.id),
     signedOffAt: text("signed_off_at"),
     updatedAt: text("updated_at").notNull().$defaultFn(now),
@@ -582,7 +593,7 @@ export const consensus = sqliteTable(
 /* Selection Board and offers (H)                                      */
 /* ------------------------------------------------------------------ */
 
-export const boards = sqliteTable("boards", {
+export const boards = pgTable("boards", {
   id: id(),
   positionId: integer("position_id").notNull().unique().references(() => positions.id),
   meetingDate: text("meeting_date").notNull().default(""),
@@ -594,7 +605,7 @@ export const boards = sqliteTable("boards", {
   updatedAt: text("updated_at").notNull().$defaultFn(now),
 });
 
-export const boardDecisions = sqliteTable(
+export const boardDecisions = pgTable(
   "board_decisions",
   {
     id: id(),
@@ -609,7 +620,7 @@ export const boardDecisions = sqliteTable(
   (t) => [uniqueIndex("board_decisions_unique_idx").on(t.positionId, t.applicationId)],
 );
 
-export const offers = sqliteTable("offers", {
+export const offers = pgTable("offers", {
   id: id(),
   applicationId: integer("application_id").notNull().unique().references(() => applications.id),
   positionId: integer("position_id").notNull().references(() => positions.id),
@@ -625,7 +636,7 @@ export const offers = sqliteTable("offers", {
 /* Email                                                               */
 /* ------------------------------------------------------------------ */
 
-export const emailTemplates = sqliteTable("email_templates", {
+export const emailTemplates = pgTable("email_templates", {
   key: text("key").primaryKey(),
   name: text("name").notNull(),
   subject: text("subject").notNull(),
@@ -634,7 +645,7 @@ export const emailTemplates = sqliteTable("email_templates", {
 });
 
 /** Every email the system sends, kept as a copy in the record. */
-export const emails = sqliteTable(
+export const emails = pgTable(
   "emails",
   {
     id: id(),
@@ -645,7 +656,7 @@ export const emails = sqliteTable(
     templateKey: text("template_key").notNull().default(""),
     applicationId: integer("application_id"),
     positionId: integer("position_id"),
-    attachments: text("attachments", { mode: "json" }).$type<{ name: string; url: string }[]>().notNull().default([]),
+    attachments: jsonb("attachments").$type<{ name: string; url: string }[]>().notNull().default([]),
     createdAt: createdAt(),
   },
   (t) => [index("emails_user_idx").on(t.toUserId)],

@@ -28,17 +28,17 @@ export const metadata: Metadata = { title: "Panel" };
 export default async function PanelPage({ params }: PageProps<"/panel/panels/[panelId]">) {
   const user = await requireUser(["panel"]);
   const { panelId } = await params;
-  const panel = db.select().from(panels).where(eq(panels.id, Number(panelId))).get();
+  const panel = (await db.select().from(panels).where(eq(panels.id, Number(panelId))))[0];
   if (!panel) notFound();
-  const member = db
+  const member = (await db
     .select()
     .from(panelMembers)
     .where(and(eq(panelMembers.panelId, panel.id), eq(panelMembers.userId, user.id), ne(panelMembers.inviteStatus, "replaced")))
     .orderBy(desc(panelMembers.id))
-    .get();
+    )[0];
   if (!member) notFound();
-  const position = db.select().from(positions).where(eq(positions.id, panel.positionId)).get()!;
-  audit(user.id, "viewed", "panel", panel.id);
+  const position = (await db.select().from(positions).where(eq(positions.id, panel.positionId)))[0]!;
+  await audit(user.id, "viewed", "panel", panel.id);
 
   const header = (
     <PageHeader
@@ -59,14 +59,14 @@ export default async function PanelPage({ params }: PageProps<"/panel/panels/[pa
     );
   }
 
-  const tor = getDoc(position.id, "tor_committee");
-  const items = getDoc(position.id, "rubric")?.[panel.round] ?? [];
-  const slots = db.select().from(panelSlots).where(eq(panelSlots.panelId, panel.id)).orderBy(asc(panelSlots.startsAt)).all();
+  const tor = await getDoc(position.id, "tor_committee");
+  const items = (await getDoc(position.id, "rubric"))?.[panel.round] ?? [];
+  const slots = (await db.select().from(panelSlots).where(eq(panelSlots.panelId, panel.id)).orderBy(asc(panelSlots.startsAt)));
   const myMarks = slots.length
-    ? db.select().from(panelAvailability).where(and(eq(panelAvailability.userId, user.id), inArray(panelAvailability.slotId, slots.map((s) => s.id)))).all()
+    ? (await db.select().from(panelAvailability).where(and(eq(panelAvailability.userId, user.id), inArray(panelAvailability.slotId, slots.map((s) => s.id)))))
     : [];
-  const panelEvents = db.select().from(events).where(and(eq(events.panelId, panel.id), ne(events.status, "cancelled"))).orderBy(asc(events.startsAt)).all();
-  const candidateRows = db
+  const panelEvents = (await db.select().from(events).where(and(eq(events.panelId, panel.id), ne(events.status, "cancelled"))).orderBy(asc(events.startsAt)));
+  const candidateRows = (await db
     .select({ app: applications, candidate: users })
     .from(applications)
     .innerJoin(users, eq(users.id, applications.candidateId))
@@ -79,11 +79,11 @@ export default async function PanelPage({ params }: PageProps<"/panel/panels/[pa
       ),
     )
     .orderBy(asc(users.name))
-    .all();
-  const declarations = db.select().from(conflicts).where(and(eq(conflicts.panelId, panel.id), eq(conflicts.userId, user.id))).all();
-  const visible = new Set(panelApplicationIds(user.id));
-  const sheet = member.isChair ? scoreSheet(position.id, panel.round) : null;
-  const cons = member.isChair ? db.select().from(consensus).where(and(eq(consensus.positionId, position.id), eq(consensus.round, panel.round))).get() ?? null : null;
+    );
+  const declarations = (await db.select().from(conflicts).where(and(eq(conflicts.panelId, panel.id), eq(conflicts.userId, user.id))));
+  const visible = new Set(await panelApplicationIds(user.id));
+  const sheet = member.isChair ? await scoreSheet(position.id, panel.round) : null;
+  const cons = member.isChair ? (await db.select().from(consensus).where(and(eq(consensus.positionId, position.id), eq(consensus.round, panel.round))))[0] ?? null : null;
 
   return (
     <>

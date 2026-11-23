@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { and, asc, eq, gt, like, lte, or } from "drizzle-orm";
+import { and, asc, eq, gt, ilike, lte, or } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { adverts, positions } from "@/lib/db/schema";
 import { DEPARTMENTS } from "@/lib/constants";
@@ -23,18 +23,18 @@ export default async function CareersPage({ searchParams }: PageProps<"/careers"
   const now = new Date();
 
   const where = [eq(adverts.status, "published"), gt(adverts.closingAt, now.toISOString())];
-  if (q) where.push(or(like(positions.title, `%${q}%`), like(positions.department, `%${q}%`), like(positions.discipline, `%${q}%`))!);
+  if (q) where.push(or(ilike(positions.title, `%${q}%`), ilike(positions.department, `%${q}%`), ilike(positions.discipline, `%${q}%`))!);
   if (dept) where.push(eq(positions.department, dept));
   if (type === "faculty" || type === "administrative") where.push(eq(positions.type, type));
   if (closes === "7" || closes === "30") where.push(lte(adverts.closingAt, new Date(now.getTime() + Number(closes) * 86_400_000).toISOString()));
 
-  const rows = db
+  const rows = (await db
     .select({ p: positions, a: adverts })
     .from(adverts)
     .innerJoin(positions, eq(positions.id, adverts.positionId))
     .where(and(...where))
     .orderBy(asc(adverts.closingAt))
-    .all();
+    );
   const filtered = !!(q || dept || type || closes);
 
   return (

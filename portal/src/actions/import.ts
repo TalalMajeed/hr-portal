@@ -63,7 +63,7 @@ export async function importCandidatesAction(_: ImportState, fd: FormData): Prom
   try {
     const user = await assertUser(["hr", "super_admin"]);
     const positionId = Number(fd.get("positionId"));
-    const position = db.select().from(positions).where(eq(positions.id, positionId)).get();
+    const position = (await db.select().from(positions).where(eq(positions.id, positionId)))[0];
     if (!position) return { error: "Choose the position to import into." };
     const file = fd.get("file");
     let text = typeof fd.get("csv") === "string" ? String(fd.get("csv")) : "";
@@ -107,7 +107,7 @@ export async function importCandidatesAction(_: ImportState, fd: FormData): Prom
       const score = col(r, "score");
       if (score) {
         // Old scores were given on other scales, so they are kept as an internal note rather than rubric scores.
-        db.insert(applicationNotes).values({ applicationId: res.applicationId, userId: user.id, body: `Imported score from the previous process: ${score}` }).run();
+        await db.insert(applicationNotes).values({ applicationId: res.applicationId, userId: user.id, body: `Imported score from the previous process: ${score}` });
       }
       results.push({
         line,
@@ -116,7 +116,7 @@ export async function importCandidatesAction(_: ImportState, fd: FormData): Prom
         message: `Added as ${res.appNo}${res.duplicateOf ? `, possible duplicate of ${res.duplicateOf}` : ""}${score ? `, score ${score} kept as a note` : ""}.`,
       });
     }
-    audit(user.id, "candidates_imported", "position", positionId, `${created} of ${table.length - 1} rows`);
+    await audit(user.id, "candidates_imported", "position", positionId, `${created} of ${table.length - 1} rows`);
     revalidatePath(`/admin/positions/${positionId}/applications`);
     return { rows: results, created };
   } catch (e) {

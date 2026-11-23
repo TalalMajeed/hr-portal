@@ -19,9 +19,9 @@ export const metadata: Metadata = { title: "My profile" };
 
 export default async function ProfilePage() {
   const user = await requireUser(["candidate"]);
-  const p = getProfile(user.id);
-  const docs = profileDocuments(user.id);
-  const limitMb = maxUploadBytes() / 1024 / 1024;
+  const p = await getProfile(user.id);
+  const docs = await profileDocuments(user.id);
+  const limitMb = await maxUploadBytes() / 1024 / 1024;
 
   return (
     <>

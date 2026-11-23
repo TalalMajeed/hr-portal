@@ -29,23 +29,23 @@ export default async function MyApplicationPage({ params, searchParams }: PagePr
   const user = await requireUser(["candidate"]);
   const { id } = await params;
   const sp = await searchParams;
-  const row = db
+  const row = (await db
     .select({ app: applications, position: positions, advert: adverts })
     .from(applications)
     .innerJoin(positions, eq(positions.id, applications.positionId))
     .leftJoin(adverts, eq(adverts.positionId, positions.id))
     .where(and(eq(applications.id, Number(id)), eq(applications.candidateId, user.id)))
-    .get();
+    )[0];
   if (!row || row.app.status === "draft") notFound();
   const { app, position, advert } = row;
-  audit(user.id, "viewed", "application", app.id, "candidate");
+  await audit(user.id, "viewed", "application", app.id, "candidate");
 
-  const history = db.select().from(applicationStatusHistory).where(eq(applicationStatusHistory.applicationId, app.id)).orderBy(asc(applicationStatusHistory.id)).all();
-  const sessions = db.select().from(events).where(eq(events.applicationId, app.id)).orderBy(asc(events.startsAt)).all().filter((e) => e.status !== "cancelled");
-  const requests = db.select().from(documentRequests).where(eq(documentRequests.applicationId, app.id)).all();
-  const offer = db.select().from(offers).where(eq(offers.applicationId, app.id)).get();
-  const ownAppDocs = db.select().from(documents).where(and(eq(documents.applicationId, app.id), eq(documents.uploadedBy, user.id))).all();
-  const profile = getProfile(user.id);
+  const history = (await db.select().from(applicationStatusHistory).where(eq(applicationStatusHistory.applicationId, app.id)).orderBy(asc(applicationStatusHistory.id)));
+  const sessions = (await db.select().from(events).where(eq(events.applicationId, app.id)).orderBy(asc(events.startsAt))).filter((e) => e.status !== "cancelled");
+  const requests = (await db.select().from(documentRequests).where(eq(documentRequests.applicationId, app.id)));
+  const offer = (await db.select().from(offers).where(eq(offers.applicationId, app.id)))[0];
+  const ownAppDocs = (await db.select().from(documents).where(and(eq(documents.applicationId, app.id), eq(documents.uploadedBy, user.id))));
+  const profile = await getProfile(user.id);
   const canWithdraw = advertIsOpen(advert) && !["withdrawn", "selected", "not_selected"].includes(app.status);
 
   return (

@@ -1,25 +1,23 @@
 import "server-only";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import path from "node:path";
-import fs from "node:fs";
+import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
 import * as schema from "./schema";
 
-export const DATA_DIR = path.resolve(process.cwd(), "data");
-export const DB_PATH = process.env.DATABASE_PATH ?? path.join(DATA_DIR, "portal.db");
-
-function open() {
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-  const sqlite = new Database(DB_PATH);
-  sqlite.pragma("journal_mode = WAL");
-  sqlite.pragma("foreign_keys = ON");
-  sqlite.pragma("busy_timeout = 5000");
-  return sqlite;
+/**
+ * Postgres through node-postgres. DATABASE_URL is any Postgres connection string;
+ * in production it is Neon's pooled endpoint. Schema changes go through the
+ * migrations folder (npm run db:generate, then npm run db:migrate), never by hand.
+ */
+function createPool() {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error("DATABASE_URL is not set. Copy .env.example to .env.local and fill it in.");
+  return new Pool({ connectionString: url, max: process.env.VERCEL ? 3 : 10, idleTimeoutMillis: 10_000 });
 }
 
-const globalForDb = globalThis as unknown as { __duSqlite?: Database.Database };
-export const sqlite = globalForDb.__duSqlite ?? open();
-if (process.env.NODE_ENV !== "production") globalForDb.__duSqlite = sqlite;
+const globalForDb = globalThis as unknown as { __duPool?: Pool };
+export const pool = globalForDb.__duPool ?? createPool();
+globalForDb.__duPool = pool;
 
-export const db = drizzle(sqlite, { schema });
+export const db = drizzle(pool, { schema });
+export type Db = typeof db;
 export { schema };

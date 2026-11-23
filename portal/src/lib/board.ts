@@ -54,44 +54,44 @@ export type CandidateRow = {
 };
 
 /** Everything the Selection Board pack needs (H1). */
-export function getBoardPack(positionId: number) {
-  const position = db.select().from(positions).where(eq(positions.id, positionId)).get();
+export async function getBoardPack(positionId: number) {
+  const position = (await db.select().from(positions).where(eq(positions.id, positionId)))[0];
   if (!position) return null;
-  const board = db.select().from(boards).where(eq(boards.positionId, positionId)).get() ?? null;
-  const advert = db.select().from(adverts).where(eq(adverts.positionId, positionId)).get() ?? null;
-  const runs = db.select().from(advertRuns).where(eq(advertRuns.positionId, positionId)).orderBy(asc(advertRuns.runDate)).all();
-  const rubric = (getDoc(positionId, "rubric") ?? { shortlisting: [], interview: [], talk: [], second_round: [] }) as RubricContent;
+  const board = (await db.select().from(boards).where(eq(boards.positionId, positionId)))[0] ?? null;
+  const advert = (await db.select().from(adverts).where(eq(adverts.positionId, positionId)))[0] ?? null;
+  const runs = (await db.select().from(advertRuns).where(eq(advertRuns.positionId, positionId)).orderBy(asc(advertRuns.runDate)));
+  const rubric = (await getDoc(positionId, "rubric") ?? { shortlisting: [], interview: [], talk: [], second_round: [] }) as RubricContent;
 
-  const apps = db
+  const apps = (await db
     .select({ a: applications, name: users.name })
     .from(applications)
     .innerJoin(users, eq(users.id, applications.candidateId))
     .where(and(eq(applications.positionId, positionId)))
-    .all()
+    )
     .filter((r) => r.a.status !== "draft");
 
   const appIds = apps.map((r) => r.a.id);
-  const reviews = appIds.length ? db.select().from(reviewAssignments).where(inArray(reviewAssignments.applicationId, appIds)).all() : [];
-  const evals = appIds.length ? db.select().from(evaluations).where(inArray(evaluations.applicationId, appIds)).all() : [];
-  const decisions = db.select().from(boardDecisions).where(eq(boardDecisions.positionId, positionId)).all();
-  const offerRows = db.select().from(offers).where(eq(offers.positionId, positionId)).all();
-  const consensusRows = db.select().from(consensus).where(eq(consensus.positionId, positionId)).all();
+  const reviews = appIds.length ? (await db.select().from(reviewAssignments).where(inArray(reviewAssignments.applicationId, appIds))) : [];
+  const evals = appIds.length ? (await db.select().from(evaluations).where(inArray(evaluations.applicationId, appIds))) : [];
+  const decisions = (await db.select().from(boardDecisions).where(eq(boardDecisions.positionId, positionId)));
+  const offerRows = (await db.select().from(offers).where(eq(offers.positionId, positionId)));
+  const consensusRows = (await db.select().from(consensus).where(eq(consensus.positionId, positionId)));
   const finalConsensus =
     consensusRows.find((c) => c.round === "second_round" && c.ranking.length) ??
     consensusRows.find((c) => c.round === "talk" && c.ranking.length) ??
     consensusRows.find((c) => c.round === "interview") ??
     null;
 
-  const panelRows = db.select().from(panels).where(eq(panels.positionId, positionId)).all();
+  const panelRows = (await db.select().from(panels).where(eq(panels.positionId, positionId)));
   const members = panelRows.length
-    ? db
+    ? (await db
         .select({ m: panelMembers, u: users })
         .from(panelMembers)
         .innerJoin(users, eq(users.id, panelMembers.userId))
         .where(inArray(panelMembers.panelId, panelRows.map((p) => p.id)))
-        .all()
+        )
     : [];
-  const coi = panelRows.length ? db.select().from(conflicts).where(inArray(conflicts.panelId, panelRows.map((p) => p.id))).all() : [];
+  const coi = panelRows.length ? (await db.select().from(conflicts).where(inArray(conflicts.panelId, panelRows.map((p) => p.id)))) : [];
 
   const counts = {
     received: apps.length,
@@ -141,12 +141,12 @@ export function getBoardPack(positionId: number) {
     })
     .sort((a, b) => (a.consensusRank ?? 999) - (b.consensusRank ?? 999) || (b.overall ?? -1) - (a.overall ?? -1));
 
-  const chair = finalConsensus?.chairId ? db.select().from(users).where(eq(users.id, finalConsensus.chairId)).get() : null;
-  const minutesDocs = db
+  const chair = finalConsensus?.chairId ? (await db.select().from(users).where(eq(users.id, finalConsensus.chairId)))[0] : null;
+  const minutesDocs = (await db
     .select()
     .from(documents)
     .where(and(eq(documents.positionId, positionId), inArray(documents.kind, ["minutes", "board_attachment"])))
-    .all();
+    );
 
   return {
     position,
@@ -154,8 +154,8 @@ export function getBoardPack(positionId: number) {
     advert,
     runs,
     rubric,
-    torPosition: getDoc(positionId, "tor_position")?.body ?? "",
-    torCommittee: getDoc(positionId, "tor_committee")?.body ?? "",
+    torPosition: (await getDoc(positionId, "tor_position"))?.body ?? "",
+    torCommittee: (await getDoc(positionId, "tor_committee"))?.body ?? "",
     counts,
     panels: panelRows.map((p) => ({
       panel: p,
@@ -169,4 +169,4 @@ export function getBoardPack(positionId: number) {
   };
 }
 
-export type BoardPack = NonNullable<ReturnType<typeof getBoardPack>>;
+export type BoardPack = NonNullable<Awaited<ReturnType<typeof getBoardPack>>>;

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Form from "next/form";
-import { and, desc, eq, like, lt, or, type SQL } from "drizzle-orm";
+import { and, desc, eq, ilike, lt, or, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { auditLog, users } from "@/lib/db/schema";
 import { requireUser } from "@/lib/auth";
@@ -21,17 +21,17 @@ export default async function AuditPage({ searchParams }: PageProps<"/admin/audi
   const entity = typeof sp.entity === "string" ? sp.entity : "";
   const before = typeof sp.before === "string" ? Number(sp.before) : 0;
   const where: SQL[] = [];
-  if (q) where.push(or(like(auditLog.action, `%${q}%`), like(auditLog.detail, `%${q}%`), like(users.name, `%${q}%`))!);
+  if (q) where.push(or(ilike(auditLog.action, `%${q}%`), ilike(auditLog.detail, `%${q}%`), ilike(users.name, `%${q}%`))!);
   if (entity) where.push(eq(auditLog.entity, entity));
   if (before) where.push(lt(auditLog.id, before));
-  const rows = db
+  const rows = (await db
     .select({ a: auditLog, name: users.name })
     .from(auditLog)
     .leftJoin(users, eq(users.id, auditLog.userId))
     .where(where.length ? and(...where) : undefined)
     .orderBy(desc(auditLog.id))
     .limit(PAGE)
-    .all();
+    );
   const entities = ["application", "position", "document", "user", "email", "report", "settings"];
   const next = rows.length === PAGE ? rows[rows.length - 1].a.id : null;
   const qs = (extra: Record<string, string>) => new URLSearchParams({ ...(q && { q }), ...(entity && { entity }), ...extra }).toString();

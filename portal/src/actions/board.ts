@@ -16,14 +16,14 @@ import { done, fail, num, safe, str, type ActionState } from "@/lib/action-state
 
 async function ctx(fd: FormData, roles: ("super_admin" | "hr" | "ed")[] = ["super_admin", "hr", "ed"]) {
   const user = await assertUser(roles);
-  const p = getPosition(num(fd, "id"));
+  const p = await getPosition(num(fd, "id"));
   if (!p || !canManagePosition(user, p)) throw new Error("Position not found.");
   return { user, p };
 }
 
-function ensureBoard(positionId: number) {
-  const b = db.select().from(boards).where(eq(boards.positionId, positionId)).get();
-  return b ?? db.insert(boards).values({ positionId }).returning().get();
+async function ensureBoard(positionId: number) {
+  const b = (await db.select().from(boards).where(eq(boards.positionId, positionId)))[0];
+  return b ?? (await db.insert(boards).values({ positionId }).returning())[0];
 }
 
 function refresh(id: number) {
@@ -31,13 +31,13 @@ function refresh(id: number) {
   revalidatePath("/board");
 }
 
-function appFor(positionId: number, applicationId: number) {
-  const row = db
+async function appFor(positionId: number, applicationId: number) {
+  const row = (await db
     .select({ a: applications, c: users })
     .from(applications)
     .innerJoin(users, eq(users.id, applications.candidateId))
     .where(and(eq(applications.id, applicationId), eq(applications.positionId, positionId)))
-    .get();
+    )[0];
   if (!row) throw new Error("Application not found.");
   return row;
 }
@@ -46,8 +46,8 @@ function appFor(positionId: number, applicationId: number) {
 export async function saveBoardAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const { user, p } = await ctx(fd);
-    const b = ensureBoard(p.id);
-    db.update(boards)
+    const b = await ensureBoard(p.id);
+    await db.update(boards)
       .set({
         meetingDate: str(fd, "meetingDate"),
         proposedSalary: str(fd, "proposedSalary"),
@@ -56,13 +56,13 @@ export async function saveBoardAction(_: ActionState, fd: FormData): Promise<Act
         updatedAt: new Date().toISOString(),
       })
       .where(eq(boards.id, b.id))
-      .run();
+      ;
     const file = fd.get("minutesFile");
     if (isFile(file)) {
       const r = await saveUpload(file, { kind: "minutes", positionId: p.id, uploadedBy: user.id, label: "Board minutes" });
       if (!r.ok) return fail(r.error);
     }
-    audit(user.id, "board_saved", "position", p.id);
+    await audit(user.id, "board_saved", "position", p.id);
     refresh(p.id);
     return done("Board details saved.");
   });
@@ -72,20 +72,20 @@ export async function saveBoardAction(_: ActionState, fd: FormData): Promise<Act
 export async function generatePackAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const { user, p } = await ctx(fd, ["super_admin", "hr"]);
-    const b = ensureBoard(p.id);
+    const b = await ensureBoard(p.id);
     const now = new Date().toISOString();
-    db.update(boards).set({ packGeneratedAt: now, updatedAt: now }).where(eq(boards.id, b.id)).run();
-    setStage(p.id, 10, user.id, "Selection Board pack generated");
-    for (const m of db.select().from(users).where(eq(users.role, "board")).all()) {
+    await db.update(boards).set({ packGeneratedAt: now, updatedAt: now }).where(eq(boards.id, b.id));
+    await setStage(p.id, 10, user.id, "Selection Board pack generated");
+    for (const m of (await db.select().from(users).where(eq(users.role, "board")))) {
       if (!m.active) continue;
-      sendEmail(
+      await sendEmail(
         { email: m.email, userId: m.id },
         `Selection Board pack: ${p.title}`,
         `Dear ${m.name},\n\nThe Selection Board pack for ${p.code} ${p.title} is ready${b.meetingDate ? ` for the meeting on ${b.meetingDate}` : ""}.\n\nRead it here: ${appUrl(`/board/${p.id}`)}\n\nDU Human Resources`,
         { positionId: p.id },
       );
     }
-    audit(user.id, "board_pack_generated", "position", p.id);
+    await audit(user.id, "board_pack_generated", "position", p.id);
     refresh(p.id);
     return done("Pack generated and sent to the Selection Board members.");
   });
@@ -95,18 +95,18 @@ export async function generatePackAction(_: ActionState, fd: FormData): Promise<
 export async function decisionAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const { user, p } = await ctx(fd);
-    const { a } = appFor(p.id, num(fd, "applicationId"));
+    const { a } = await appFor(p.id, num(fd, "applicationId"));
     const decision = str(fd, "decision") as "recommended" | "not_recommended" | "deferred";
     if (!["recommended", "not_recommended", "deferred"].includes(decision)) return fail("Choose a decision.");
     const rank = num(fd, "rank") || null;
     const notes = str(fd, "notes");
-    const existing = db.select().from(boardDecisions).where(and(eq(boardDecisions.positionId, p.id), eq(boardDecisions.applicationId, a.id))).get();
+    const existing = (await db.select().from(boardDecisions).where(and(eq(boardDecisions.positionId, p.id), eq(boardDecisions.applicationId, a.id))))[0];
     if (existing) {
-      db.update(boardDecisions).set({ decision, rank, notes, userId: user.id }).where(eq(boardDecisions.id, existing.id)).run();
+      await db.update(boardDecisions).set({ decision, rank, notes, userId: user.id }).where(eq(boardDecisions.id, existing.id));
     } else {
-      db.insert(boardDecisions).values({ positionId: p.id, applicationId: a.id, decision, rank, notes, userId: user.id }).run();
+      await db.insert(boardDecisions).values({ positionId: p.id, applicationId: a.id, decision, rank, notes, userId: user.id });
     }
-    audit(user.id, "board_decision", "application", a.id, `${decision}${rank ? ` rank ${rank}` : ""}${notes ? `: ${notes}` : ""}`);
+    await audit(user.id, "board_decision", "application", a.id, `${decision}${rank ? ` rank ${rank}` : ""}${notes ? `: ${notes}` : ""}`);
     refresh(p.id);
     return done("Decision recorded.");
   });
@@ -116,11 +116,11 @@ export async function decisionAction(_: ActionState, fd: FormData): Promise<Acti
 export async function edSignOffAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const { user, p } = await ctx(fd, ["super_admin", "ed"]);
-    const b = ensureBoard(p.id);
+    const b = await ensureBoard(p.id);
     if (!b.packGeneratedAt) return fail("Generate the pack first.");
-    if (!db.select().from(boardDecisions).where(eq(boardDecisions.positionId, p.id)).all().length) return fail("Record the Board's decisions first.");
-    db.update(boards).set({ edSignedOffAt: new Date().toISOString() }).where(eq(boards.id, b.id)).run();
-    audit(user.id, "board_signed_off", "position", p.id);
+    if (!(await db.select().from(boardDecisions).where(eq(boardDecisions.positionId, p.id))).length) return fail("Record the Board's decisions first.");
+    await db.update(boards).set({ edSignedOffAt: new Date().toISOString() }).where(eq(boards.id, b.id));
+    await audit(user.id, "board_signed_off", "position", p.id);
     refresh(p.id);
     return done("Signed off.");
   });
@@ -130,15 +130,15 @@ function defaultOfferBody(p: typeof positions.$inferSelect, salary: string, term
   return `Position: ${p.title}, ${p.department}\nGrade: ${p.grade}\nSalary: ${salary || "as agreed"}\nReporting to: ${p.reportingLine || "as assigned"}\n\n${terms || "Other terms as per Daanish University service rules."}\n\nThis offer is valid for 14 days.`;
 }
 
-function issueOffer(userId: number, p: typeof positions.$inferSelect, applicationId: number, salary: string, body: string) {
-  const { a, c } = appFor(p.id, applicationId);
-  if (db.select().from(offers).where(eq(offers.applicationId, a.id)).get()) throw new Error(`${c.name} already has an offer.`);
-  db.insert(offers).values({ applicationId: a.id, positionId: p.id, salary, body }).run();
-  setApplicationStatus(a.id, "selected", userId, { notify: false });
+async function issueOffer(userId: number, p: typeof positions.$inferSelect, applicationId: number, salary: string, body: string) {
+  const { a, c } = await appFor(p.id, applicationId);
+  if ((await db.select().from(offers).where(eq(offers.applicationId, a.id)))[0]) throw new Error(`${c.name} already has an offer.`);
+  await db.insert(offers).values({ applicationId: a.id, positionId: p.id, salary, body });
+  await setApplicationStatus(a.id, "selected", userId, { notify: false });
   if (!c.email.endsWith("@placeholder.local")) {
-    sendTemplate("offer", { email: c.email, userId: c.id }, { name: c.name, position: p.title, offer_body: body }, { applicationId: a.id, positionId: p.id });
+    await sendTemplate("offer", { email: c.email, userId: c.id }, { name: c.name, position: p.title, offer_body: body }, { applicationId: a.id, positionId: p.id });
   }
-  audit(userId, "offer_sent", "application", a.id, salary);
+  await audit(userId, "offer_sent", "application", a.id, salary);
   return c.name;
 }
 
@@ -146,10 +146,10 @@ function issueOffer(userId: number, p: typeof positions.$inferSelect, applicatio
 export async function sendOfferAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const { user, p } = await ctx(fd, ["super_admin", "hr"]);
-    const b = ensureBoard(p.id);
+    const b = await ensureBoard(p.id);
     const salary = str(fd, "salary") || b.proposedSalary;
     const body = str(fd, "body") || defaultOfferBody(p, salary, b.terms);
-    const name = issueOffer(user.id, p, num(fd, "applicationId"), salary, body);
+    const name = await issueOffer(user.id, p, num(fd, "applicationId"), salary, body);
     refresh(p.id);
     return done(`Offer sent to ${name}.`);
   });
@@ -159,17 +159,17 @@ export async function sendOfferAction(_: ActionState, fd: FormData): Promise<Act
 export async function offerNextAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const { user, p } = await ctx(fd, ["super_admin", "hr"]);
-    const b = ensureBoard(p.id);
-    const taken = new Set(db.select().from(offers).where(eq(offers.positionId, p.id)).all().map((o) => o.applicationId));
-    const next = db
+    const b = await ensureBoard(p.id);
+    const taken = new Set((await db.select().from(offers).where(eq(offers.positionId, p.id))).map((o) => o.applicationId));
+    const next = (await db
       .select()
       .from(boardDecisions)
       .where(and(eq(boardDecisions.positionId, p.id), eq(boardDecisions.decision, "recommended")))
-      .all()
+      )
       .filter((d) => !taken.has(d.applicationId))
       .sort((x, y) => (x.rank ?? 99) - (y.rank ?? 99))[0];
     if (!next) return fail("There is no other recommended candidate. Record a Board decision for a reserve candidate first.");
-    const name = issueOffer(user.id, p, next.applicationId, b.proposedSalary, defaultOfferBody(p, b.proposedSalary, b.terms));
+    const name = await issueOffer(user.id, p, next.applicationId, b.proposedSalary, defaultOfferBody(p, b.proposedSalary, b.terms));
     refresh(p.id);
     return done(`Offer sent to the next candidate, ${name}.`);
   });
@@ -178,22 +178,22 @@ export async function offerNextAction(_: ActionState, fd: FormData): Promise<Act
 export async function offerStatusAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const { user, p } = await ctx(fd, ["super_admin", "hr"]);
-    const offer = db.select().from(offers).where(and(eq(offers.id, num(fd, "offerId")), eq(offers.positionId, p.id))).get();
+    const offer = (await db.select().from(offers).where(and(eq(offers.id, num(fd, "offerId")), eq(offers.positionId, p.id))))[0];
     if (!offer) return fail("Offer not found.");
     const step = str(fd, "step");
     const now = new Date().toISOString();
     if (step === "joined") {
       if (offer.status !== "accepted") return fail("Only an accepted offer can be marked as joined.");
-      db.update(offers).set({ joinedAt: str(fd, "joinedAt") || now.slice(0, 10) }).where(eq(offers.id, offer.id)).run();
-      const filled = db.select().from(offers).where(eq(offers.positionId, p.id)).all().filter((o) => o.joinedAt || o.id === offer.id).length;
-      if (filled >= p.posts) db.update(positions).set({ status: "filled", updatedAt: now }).where(eq(positions.id, p.id)).run();
+      await db.update(offers).set({ joinedAt: str(fd, "joinedAt") || now.slice(0, 10) }).where(eq(offers.id, offer.id));
+      const filled = (await db.select().from(offers).where(eq(offers.positionId, p.id))).filter((o) => o.joinedAt || o.id === offer.id).length;
+      if (filled >= p.posts) await db.update(positions).set({ status: "filled", updatedAt: now }).where(eq(positions.id, p.id));
     } else if (step === "accepted" || step === "declined") {
-      db.update(offers).set({ status: step, respondedAt: now }).where(eq(offers.id, offer.id)).run();
-      if (step === "declined") setApplicationStatus(offer.applicationId, "not_selected", user.id, { notify: false, note: "Declined the offer" });
+      await db.update(offers).set({ status: step, respondedAt: now }).where(eq(offers.id, offer.id));
+      if (step === "declined") await setApplicationStatus(offer.applicationId, "not_selected", user.id, { notify: false, note: "Declined the offer" });
     } else if (step === "withdrawn") {
-      db.update(offers).set({ status: "withdrawn", respondedAt: now }).where(eq(offers.id, offer.id)).run();
+      await db.update(offers).set({ status: "withdrawn", respondedAt: now }).where(eq(offers.id, offer.id));
     } else return fail("Unknown step.");
-    audit(user.id, `offer_${step}`, "application", offer.applicationId);
+    await audit(user.id, `offer_${step}`, "application", offer.applicationId);
     refresh(p.id);
     return done("Offer updated.");
   });
@@ -206,23 +206,23 @@ export async function sendRegretsAction(_: ActionState, fd: FormData): Promise<A
     const ids = fd.getAll("applicationIds").map(Number).filter(Boolean);
     if (!ids.length) return fail("Select at least one candidate.");
     const includeReason = str(fd, "includeReason") === "on";
-    const tpl = db.select().from(emailTemplates).where(eq(emailTemplates.key, "regret")).get();
+    const tpl = (await db.select().from(emailTemplates).where(eq(emailTemplates.key, "regret")))[0];
     if (!tpl) return fail("The regret template is missing.");
-    const rows = db
+    const rows = (await db
       .select({ a: applications, c: users })
       .from(applications)
       .innerJoin(users, eq(users.id, applications.candidateId))
       .where(and(eq(applications.positionId, p.id), inArray(applications.id, ids)))
-      .all();
+      );
     let sent = 0;
     for (const { a, c } of rows) {
-      const already = db.select().from(emails).where(and(eq(emails.applicationId, a.id), eq(emails.templateKey, "regret"))).get();
+      const already = (await db.select().from(emails).where(and(eq(emails.applicationId, a.id), eq(emails.templateKey, "regret"))))[0];
       if (already) continue;
-      setApplicationStatus(a.id, "not_selected", user.id, { notify: false, note: "Regret sent" });
+      await setApplicationStatus(a.id, "not_selected", user.id, { notify: false, note: "Regret sent" });
       if (!c.email.endsWith("@placeholder.local")) {
         const reason = includeReason && a.shareRejectionReason && a.rejectionReason ? `Reason: ${a.rejectionReason}` : "";
         const vars = { name: c.name, position: p.title, reason, portal_url: appUrl() };
-        sendEmail({ email: c.email, userId: c.id }, renderTemplate(tpl.subject, vars), renderTemplate(tpl.body, vars), {
+        await sendEmail({ email: c.email, userId: c.id }, renderTemplate(tpl.subject, vars), renderTemplate(tpl.body, vars), {
           templateKey: "regret",
           applicationId: a.id,
           positionId: p.id,
@@ -230,7 +230,7 @@ export async function sendRegretsAction(_: ActionState, fd: FormData): Promise<A
       }
       sent++;
     }
-    audit(user.id, "regrets_sent", "position", p.id, `${sent} candidates`);
+    await audit(user.id, "regrets_sent", "position", p.id, `${sent} candidates`);
     refresh(p.id);
     return done(sent ? `Regret emails sent to ${sent} ${sent === 1 ? "candidate" : "candidates"}.` : "Everyone selected already had a regret email.");
   });

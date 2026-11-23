@@ -19,7 +19,7 @@ export default async function PanelsPage({ params }: PageProps<"/admin/positions
   const user = await requireUser(STAFF_ROLES);
   const { id } = await params;
   const position = await positionForPage(user, id);
-  const list = db.select().from(panels).where(eq(panels.positionId, position.id)).orderBy(asc(panels.id)).all();
+  const list = (await db.select().from(panels).where(eq(panels.positionId, position.id)).orderBy(asc(panels.id)));
   const missing = PANEL_ROUNDS.filter((r) => !list.some((p) => p.round === r) && (position.type === "faculty" || r !== "talk"));
 
   return (

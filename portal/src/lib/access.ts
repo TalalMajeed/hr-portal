@@ -11,48 +11,48 @@ export function canManagePosition(user: SessionUser, position: { hiringLeadId: n
 }
 
 /** Positions a staff member can open. `null` means all of them. */
-export function visiblePositionIds(user: SessionUser): number[] | null {
+export async function visiblePositionIds(user: SessionUser): Promise<number[] | null> {
   if (["super_admin", "ed", "hr"].includes(user.role)) return null;
   if (user.role === "hiring_lead") {
-    return db
+    return (await db
       .select({ id: positions.id })
       .from(positions)
       .where(or(eq(positions.hiringLeadId, user.id), eq(positions.createdBy, user.id)))
-      .all()
+      )
       .map((p) => p.id);
   }
   return [];
 }
 
 /** Panel members see only candidates they are scheduled to meet and have not declared a conflict with. */
-export function panelApplicationIds(userId: number): number[] {
-  const memberships = db
+export async function panelApplicationIds(userId: number): Promise<number[]> {
+  const memberships = (await db
     .select({ panelId: panelMembers.panelId })
     .from(panelMembers)
     .where(and(eq(panelMembers.userId, userId), eq(panelMembers.inviteStatus, "accepted")))
-    .all()
+    )
     .map((m) => m.panelId);
   if (!memberships.length) return [];
-  const appIds = db
+  const appIds = (await db
     .select({ applicationId: events.applicationId })
     .from(events)
     .where(inArray(events.panelId, memberships))
-    .all()
+    )
     .map((e) => e.applicationId);
   const conflicted = new Set(
-    db
+    (await db
       .select({ applicationId: conflicts.applicationId })
       .from(conflicts)
       .where(and(eq(conflicts.userId, userId), eq(conflicts.hasConflict, true)))
-      .all()
+      )
       .map((c) => c.applicationId),
   );
   return [...new Set(appIds)].filter((id) => !conflicted.has(id));
 }
 
 /** Confidentiality rule from the SRS, applied to an application and its files. */
-export function canViewApplication(user: SessionUser, applicationId: number) {
-  const app = db.select().from(applications).where(eq(applications.id, applicationId)).get();
+export async function canViewApplication(user: SessionUser, applicationId: number) {
+  const app = (await db.select().from(applications).where(eq(applications.id, applicationId)))[0];
   if (!app) return false;
   switch (user.role) {
     case "super_admin":
@@ -60,7 +60,7 @@ export function canViewApplication(user: SessionUser, applicationId: number) {
     case "hr":
       return true;
     case "hiring_lead": {
-      const p = db.select().from(positions).where(eq(positions.id, app.positionId)).get();
+      const p = (await db.select().from(positions).where(eq(positions.id, app.positionId)))[0];
       return !!p && canManagePosition(user, p);
     }
     case "candidate":
@@ -68,15 +68,15 @@ export function canViewApplication(user: SessionUser, applicationId: number) {
     case "agency":
       return app.agencyId === user.id;
     case "reviewer":
-      return !!db
+      return !!(await db
         .select()
         .from(reviewAssignments)
         .where(and(eq(reviewAssignments.applicationId, applicationId), eq(reviewAssignments.reviewerId, user.id)))
-        .get();
+        )[0];
     case "panel":
-      return panelApplicationIds(user.id).includes(applicationId);
+      return (await panelApplicationIds(user.id)).includes(applicationId);
     case "board": {
-      const p = db.select().from(positions).where(eq(positions.id, app.positionId)).get();
+      const p = (await db.select().from(positions).where(eq(positions.id, app.positionId)))[0];
       return !!p && p.stage === 10;
     }
     default:
@@ -84,19 +84,19 @@ export function canViewApplication(user: SessionUser, applicationId: number) {
   }
 }
 
-export function panelsForUser(userId: number) {
-  return db
+export async function panelsForUser(userId: number) {
+  return (await db
     .select({ panel: panels, member: panelMembers })
     .from(panelMembers)
     .innerJoin(panels, eq(panels.id, panelMembers.panelId))
     .where(eq(panelMembers.userId, userId))
-    .all();
+    );
 }
 
 /** Loads a position for a staff page, or shows 404 when it doesn't exist or the user can't manage it. */
 export async function positionForPage(user: SessionUser, id: string | number) {
   const { notFound } = await import("next/navigation");
-  const p = db.select().from(positions).where(eq(positions.id, Number(id))).get();
+  const p = (await db.select().from(positions).where(eq(positions.id, Number(id))))[0];
   if (!p || !canManagePosition(user, p)) notFound();
   return p!;
 }

@@ -21,37 +21,37 @@ export const metadata: Metadata = { title: "My applications" };
 
 export default async function CandidateDashboard() {
   const user = await requireUser(["candidate"]);
-  const profile = getProfile(user.id);
-  const apps = db
+  const profile = await getProfile(user.id);
+  const apps = (await db
     .select({ app: applications, position: positions, advert: adverts })
     .from(applications)
     .innerJoin(positions, eq(positions.id, applications.positionId))
     .leftJoin(adverts, eq(adverts.positionId, positions.id))
     .where(eq(applications.candidateId, user.id))
     .orderBy(desc(applications.updatedAt))
-    .all();
+    );
   const appIds = apps.map((a) => a.app.id);
   const titleOf = (applicationId: number) => apps.find((a) => a.app.id === applicationId)?.position.title ?? "";
 
   const invitations = appIds.length
-    ? db
+    ? (await db
         .select()
         .from(events)
         .where(and(inArray(events.applicationId, appIds), ne(events.status, "cancelled")))
         .orderBy(events.startsAt)
-        .all()
+        )
         .filter((e) => e.startsAt > invitationCutoff() && e.status !== "completed")
     : [];
-  const myOffers = appIds.length ? db.select().from(offers).where(inArray(offers.applicationId, appIds)).all() : [];
+  const myOffers = appIds.length ? (await db.select().from(offers).where(inArray(offers.applicationId, appIds))) : [];
   const requests = appIds.length
-    ? db.select().from(documentRequests).where(and(inArray(documentRequests.applicationId, appIds), eq(documentRequests.status, "open"))).all()
+    ? (await db.select().from(documentRequests).where(and(inArray(documentRequests.applicationId, appIds), eq(documentRequests.status, "open"))))
     : [];
-  const messages = db.select().from(emails).where(eq(emails.toUserId, user.id)).orderBy(desc(emails.id)).limit(10).all();
+  const messages = (await db.select().from(emails).where(eq(emails.toUserId, user.id)).orderBy(desc(emails.id)).limit(10));
 
   const missing: string[] = [];
   if (!profile.cnic || !profile.dateOfBirth) missing.push("personal details");
   if (!profile.education.length) missing.push("qualifications");
-  if (!profileDocuments(user.id).some((d) => d.kind === "cv")) missing.push("your CV");
+  if (!(await profileDocuments(user.id)).some((d) => d.kind === "cv")) missing.push("your CV");
 
   return (
     <>

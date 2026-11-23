@@ -52,42 +52,42 @@ export default async function ApplicationPage({ params }: PageProps<"/admin/appl
   const user = await requireUser(STAFF_ROLES);
   const { id } = await params;
   const appId = Number(id);
-  if (!Number.isInteger(appId) || !canViewApplication(user, appId)) notFound();
-  const app = db.select().from(applications).where(eq(applications.id, appId)).get()!;
-  const position = db.select().from(positions).where(eq(positions.id, app.positionId)).get()!;
-  const candidate = db.select().from(users).where(eq(users.id, app.candidateId)).get()!;
-  const advert = db.select().from(adverts).where(eq(adverts.positionId, position.id)).get();
-  audit(user.id, "viewed", "application", app.id, app.appNo ?? "");
+  if (!Number.isInteger(appId) || !await canViewApplication(user, appId)) notFound();
+  const app = (await db.select().from(applications).where(eq(applications.id, appId)))[0]!;
+  const position = (await db.select().from(positions).where(eq(positions.id, app.positionId)))[0]!;
+  const candidate = (await db.select().from(users).where(eq(users.id, app.candidateId)))[0]!;
+  const advert = (await db.select().from(adverts).where(eq(adverts.positionId, position.id)))[0];
+  await audit(user.id, "viewed", "application", app.id, app.appNo ?? "");
 
-  const items = getDoc(position.id, "rubric")?.shortlisting ?? [];
-  const reviews = db
+  const items = (await getDoc(position.id, "rubric"))?.shortlisting ?? [];
+  const reviews = (await db
     .select({ ra: reviewAssignments, reviewer: users })
     .from(reviewAssignments)
     .innerJoin(users, eq(users.id, reviewAssignments.reviewerId))
     .where(eq(reviewAssignments.applicationId, app.id))
     .orderBy(asc(reviewAssignments.id))
-    .all();
+    );
   const totals = reviews.filter((r) => r.ra.submittedAt).map((r) => weightedTotal(r.ra.scores, items)).filter((n): n is number => n !== null);
-  const reviewerList = db.select().from(users).where(eq(users.role, "reviewer")).orderBy(asc(users.name)).all();
+  const reviewerList = (await db.select().from(users).where(eq(users.role, "reviewer")).orderBy(asc(users.name)));
 
-  const notes = db
+  const notes = (await db
     .select({ n: applicationNotes, by: users.name })
     .from(applicationNotes)
     .innerJoin(users, eq(users.id, applicationNotes.userId))
     .where(eq(applicationNotes.applicationId, app.id))
     .orderBy(desc(applicationNotes.id))
-    .all();
-  const requests = db.select().from(documentRequests).where(eq(documentRequests.applicationId, app.id)).orderBy(desc(documentRequests.id)).all();
-  const attachedDocs = db.select().from(documents).where(eq(documents.applicationId, app.id)).orderBy(asc(documents.id)).all();
-  const history = db
+    );
+  const requests = (await db.select().from(documentRequests).where(eq(documentRequests.applicationId, app.id)).orderBy(desc(documentRequests.id)));
+  const attachedDocs = (await db.select().from(documents).where(eq(documents.applicationId, app.id)).orderBy(asc(documents.id)));
+  const history = (await db
     .select({ h: applicationStatusHistory, by: users.name })
     .from(applicationStatusHistory)
     .leftJoin(users, eq(users.id, applicationStatusHistory.userId))
     .where(eq(applicationStatusHistory.applicationId, app.id))
     .orderBy(desc(applicationStatusHistory.id))
-    .all();
-  const sessions = db.select().from(events).where(eq(events.applicationId, app.id)).orderBy(asc(events.startsAt)).all();
-  const duplicates = db
+    );
+  const sessions = (await db.select().from(events).where(eq(events.applicationId, app.id)).orderBy(asc(events.startsAt)));
+  const duplicates = (await db
     .select({ a: applications, name: users.name, positionTitle: positions.title })
     .from(applications)
     .innerJoin(users, eq(users.id, applications.candidateId))
@@ -97,12 +97,12 @@ export default async function ApplicationPage({ params }: PageProps<"/admin/appl
         ? or(eq(applications.id, app.duplicateOfId), and(isNotNull(applications.duplicateOfId), eq(applications.duplicateOfId, app.id)))
         : and(isNotNull(applications.duplicateOfId), eq(applications.duplicateOfId, app.id)),
     )
-    .all();
-  const agency = app.agencyId ? db.select().from(users).where(eq(users.id, app.agencyId)).get() : null;
+    );
+  const agency = app.agencyId ? (await db.select().from(users).where(eq(users.id, app.agencyId)))[0] : null;
   const eligible = isEligible(app);
   const tz = app.snapshot?.profile.timezone;
   const requestDocIds = requests.map((r) => r.documentId).filter((n): n is number => !!n);
-  const fulfilledDocs = requestDocIds.length ? db.select().from(documents).where(inArray(documents.id, requestDocIds)).all() : [];
+  const fulfilledDocs = requestDocIds.length ? (await db.select().from(documents).where(inArray(documents.id, requestDocIds))) : [];
 
   return (
     <>
@@ -269,7 +269,7 @@ export default async function ApplicationPage({ params }: PageProps<"/admin/appl
             </Card>
           )}
 
-          <ProfileView snapshot={app.snapshot ?? buildSnapshot(candidate.id)} answers={app.answers} questions={advert?.questions ?? []} />
+          <ProfileView snapshot={app.snapshot ?? await buildSnapshot(candidate.id)} answers={app.answers} questions={advert?.questions ?? []} />
         </div>
 
         <div className="grid min-w-0 content-start gap-6">

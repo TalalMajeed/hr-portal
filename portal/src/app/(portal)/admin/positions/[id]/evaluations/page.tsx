@@ -27,9 +27,9 @@ export default async function EvaluationsPage({ params }: PageProps<"/admin/posi
   const user = await requireUser(STAFF_ROLES);
   const { id } = await params;
   const position = await positionForPage(user, id);
-  const rounds = roundsWithEvents(position.id);
+  const rounds = await roundsWithEvents(position.id);
   const isEd = ["ed", "super_admin"].includes(user.role);
-  const missing = expectedEvaluations(position.id).filter((r) => r.evaluation?.status !== "submitted");
+  const missing = (await expectedEvaluations(position.id)).filter((r) => r.evaluation?.status !== "submitted");
   const overdue = missing.filter((r) => isPast(r.event.startsAt));
 
   if (!rounds.length) return <EmptyState title="No sessions yet">Evaluations appear once interviews, talks or second rounds are scheduled.</EmptyState>;
@@ -72,10 +72,10 @@ export default async function EvaluationsPage({ params }: PageProps<"/admin/posi
         )}
       </Card>
 
-      {rounds.map((round) => {
-        const sheet = scoreSheet(position.id, round);
-        const chair = chairFor(position.id, round);
-        const cons = db.select().from(consensus).where(and(eq(consensus.positionId, position.id), eq(consensus.round, round))).get() ?? null;
+      {await Promise.all(rounds.map(async (round) => {
+        const sheet = await scoreSheet(position.id, round);
+        const chair = await chairFor(position.id, round);
+        const cons = (await db.select().from(consensus).where(and(eq(consensus.positionId, position.id), eq(consensus.round, round))))[0] ?? null;
         return (
           <section key={round} className="grid gap-4">
             <h2 className="text-xl font-semibold">{ROUND_LABELS[round]}</h2>
@@ -210,7 +210,7 @@ export default async function EvaluationsPage({ params }: PageProps<"/admin/posi
             </Card>
           </section>
         );
-      })}
+      }))}
     </div>
   );
 }

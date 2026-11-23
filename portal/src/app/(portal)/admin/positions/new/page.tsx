@@ -13,7 +13,7 @@ export const metadata: Metadata = { title: "New position" };
 
 export default async function NewPositionPage() {
   const user = await requireUser(["super_admin", "hr", "hiring_lead"]);
-  const leads = db.select({ id: users.id, name: users.name, designation: users.designation }).from(users).where(eq(users.role, "hiring_lead")).all();
+  const leads = (await db.select({ id: users.id, name: users.name, designation: users.designation }).from(users).where(eq(users.role, "hiring_lead")));
   return (
     <>
       <PageHeader

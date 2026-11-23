@@ -1,19 +1,17 @@
 import "server-only";
-import fs from "node:fs/promises";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { db, DATA_DIR } from "@/lib/db";
-import { documents, settings, type DocumentKind } from "@/lib/db/schema";
+import { db } from "@/lib/db";
+import { documentFiles, documents, settings, type DocumentKind } from "@/lib/db/schema";
 import { audit } from "@/lib/audit";
 
-export const UPLOAD_DIR = path.join(DATA_DIR, "uploads");
 export const ALLOWED_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png"];
 export const ACCEPT_ATTR = ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png";
 
-export function maxUploadBytes() {
-  const row = db.select().from(settings).where(eq(settings.key, "max_upload_mb")).get();
-  return Number(row?.value ?? 5) * 1024 * 1024;
+export async function maxUploadBytes() {
+  const row = (await db.select().from(settings).where(eq(settings.key, "max_upload_mb")))[0];
+  return Math.min(4, Number(row?.value ?? 4)) * 1024 * 1024;
 }
 
 /** Checks the file's first bytes, so a renamed file can't pass as a PDF or image. */
@@ -55,20 +53,18 @@ export function isFile(value: FormDataEntryValue | null): value is File {
 export async function saveUpload(file: File, meta: UploadMeta): Promise<UploadResult> {
   const ext = path.extname(file.name).toLowerCase();
   if (!ALLOWED_EXTENSIONS.includes(ext)) return { ok: false, error: `${file.name}: only PDF, JPG and PNG files are accepted.` };
-  const limit = maxUploadBytes();
+  const limit = await maxUploadBytes();
   if (file.size > limit) return { ok: false, error: `${file.name} is larger than ${limit / 1024 / 1024} MB.` };
   const buf = Buffer.from(await file.arrayBuffer());
   const kind = sniff(buf);
   if (!kind) return { ok: false, error: `${file.name} isn't a real PDF, JPG or PNG file.` };
   const scanError = scan(buf, kind.mime);
   if (scanError) {
-    audit(meta.uploadedBy, "upload_rejected", "document", null, `${file.name}: ${scanError}`);
+    await audit(meta.uploadedBy, "upload_rejected", "document", null, `${file.name}: ${scanError}`);
     return { ok: false, error: scanError };
   }
-  await fs.mkdir(UPLOAD_DIR, { recursive: true });
   const storedName = `${randomBytes(16).toString("hex")}${kind.ext}`;
-  await fs.writeFile(path.join(UPLOAD_DIR, storedName), buf);
-  const row = db
+  const row = (await db
     .insert(documents)
     .values({
       ownerUserId: meta.ownerUserId ?? null,
@@ -83,11 +79,14 @@ export async function saveUpload(file: File, meta: UploadMeta): Promise<UploadRe
       uploadedBy: meta.uploadedBy ?? null,
     })
     .returning({ id: documents.id })
-    .get();
-  audit(meta.uploadedBy, "upload", "document", row.id, `${meta.kind}: ${file.name}`);
+    )[0];
+  await db.insert(documentFiles).values({ documentId: row.id, data: buf });
+  await audit(meta.uploadedBy, "upload", "document", row.id, `${meta.kind}: ${file.name}`);
   return { ok: true, id: row.id };
 }
 
-export async function readUpload(storedName: string) {
-  return fs.readFile(path.join(UPLOAD_DIR, path.basename(storedName)));
+/** The file's bytes. Uploads are stored in Postgres so they survive serverless deploys. */
+export async function readUpload(documentId: number) {
+  const row = (await db.select({ data: documentFiles.data }).from(documentFiles).where(eq(documentFiles.documentId, documentId)))[0];
+  return row?.data ?? null;
 }

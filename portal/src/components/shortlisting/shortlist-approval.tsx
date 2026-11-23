@@ -12,14 +12,14 @@ import { Badge } from "@/components/ui/badge";
 import { Notice } from "@/components/ui/notice";
 
 /** D7: the shortlist goes to the ED before anyone is contacted. */
-export function ShortlistApproval({ positionId, shortCount, user }: { positionId: number; shortCount: number; user: SessionUser }) {
-  const latest = db
+export async function ShortlistApproval({ positionId, shortCount, user }: { positionId: number; shortCount: number; user: SessionUser }) {
+  const latest = (await db
     .select({ a: approvals, by: users.name })
     .from(approvals)
     .leftJoin(users, eq(users.id, approvals.userId))
     .where(and(eq(approvals.positionId, positionId), eq(approvals.subject, "shortlist")))
     .orderBy(desc(approvals.id))
-    .get();
+    )[0];
   const state = latest?.a.action ?? "none";
   const isApprover = ["ed", "super_admin"].includes(user.role);
   const badge =

@@ -43,11 +43,11 @@ function Check({ ok, children }: { ok: boolean; children: ReactNode }) {
 export default async function ApplyPage({ params }: PageProps<"/me/apply/[code]">) {
   const user = await requireUser(["candidate"]);
   const { code } = await params;
-  const post = postByCode(code);
+  const post = await postByCode(code);
   if (!post || !post.advert.publishedAt) notFound();
   const { position: p, advert: a } = post;
 
-  const app = db.select().from(applications).where(and(eq(applications.positionId, p.id), eq(applications.candidateId, user.id))).get();
+  const app = (await db.select().from(applications).where(and(eq(applications.positionId, p.id), eq(applications.candidateId, user.id))))[0];
   if (app && app.status !== "draft") redirect(`/me/applications/${app.id}`);
 
   if (!advertIsOpen(a)) {
@@ -61,13 +61,13 @@ export default async function ApplyPage({ params }: PageProps<"/me/apply/[code]"
     );
   }
 
-  const profile = getProfile(user.id);
-  const docs = profileDocuments(user.id);
+  const profile = await getProfile(user.id);
+  const docs = await profileDocuments(user.id);
   const docKinds = docs.map((d) => d.kind);
-  const jd = getDoc(p.id, "jd");
-  const eligibility = checkEligibility(getDoc(p.id, "criteria"), profile, docKinds);
+  const jd = await getDoc(p.id, "jd");
+  const eligibility = checkEligibility(await getDoc(p.id, "criteria"), profile, docKinds);
   const unmet = eligibility.items.filter((i) => !i.met && i.mandatory);
-  const extraDocs = app ? db.select().from(documents).where(eq(documents.applicationId, app.id)).all() : [];
+  const extraDocs = app ? (await db.select().from(documents).where(eq(documents.applicationId, app.id))) : [];
   const answers = app?.answers ?? {};
   const isFaculty = p.type === "faculty";
 

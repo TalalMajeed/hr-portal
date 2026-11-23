@@ -25,9 +25,9 @@ export const metadata: Metadata = { title: "Advert" };
 export default async function AdvertPage({ params }: PageProps<"/admin/positions/[id]/advert">) {
   const user = await requireUser(STAFF_ROLES);
   const p = await positionForPage(user, (await params).id);
-  closeExpiredAdverts();
-  const ad = db.select().from(adverts).where(eq(adverts.positionId, p.id)).get();
-  const runs = db.select().from(advertRuns).where(eq(advertRuns.positionId, p.id)).orderBy(desc(advertRuns.runDate)).all();
+  await closeExpiredAdverts();
+  const ad = (await db.select().from(adverts).where(eq(adverts.positionId, p.id)))[0];
+  const runs = (await db.select().from(advertRuns).where(eq(advertRuns.positionId, p.id)).orderBy(desc(advertRuns.runDate)));
   const isHr = ["hr", "super_admin"].includes(user.role);
   const isEd = ["ed", "super_admin"].includes(user.role);
 

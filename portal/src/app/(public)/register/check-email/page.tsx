@@ -3,7 +3,7 @@ import { resendVerificationAction } from "@/actions/auth";
 import { AuthCard } from "@/components/layout/auth-card";
 import { ActionForm } from "@/components/ui/action-form";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { DemoOutbox } from "@/components/auth/demo-outbox";
+import { VerificationPreview } from "@/components/auth/mail-preview";
 
 export const metadata: Metadata = { title: "Check your email" };
 
@@ -18,7 +18,7 @@ export default async function CheckEmailPage({ searchParams }: PageProps<"/regis
           Send a new link
         </SubmitButton>
       </ActionForm>
-      {email && <DemoOutbox email={email} templateKey="verify_email" />}
+      {email && <VerificationPreview email={email} />}
     </AuthCard>
   );
 }

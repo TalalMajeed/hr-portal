@@ -14,21 +14,21 @@ import { done, fail, num, safe, str, type ActionState } from "@/lib/action-state
 export async function saveReviewAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const user = await assertUser(["reviewer"]);
-    const a = db.select().from(reviewAssignments).where(eq(reviewAssignments.id, num(fd, "assignmentId"))).get();
+    const a = (await db.select().from(reviewAssignments).where(eq(reviewAssignments.id, num(fd, "assignmentId"))))[0];
     if (!a || a.reviewerId !== user.id) return fail("This review isn't assigned to you.");
     if (a.submittedAt) return fail("You've already submitted this review. Ask HR if something needs changing.");
-    const app = db.select().from(applications).where(eq(applications.id, a.applicationId)).get()!;
-    const items = getDoc(app.positionId, "rubric")?.shortlisting ?? [];
+    const app = (await db.select().from(applications).where(eq(applications.id, a.applicationId)))[0]!;
+    const items = (await getDoc(app.positionId, "rubric"))?.shortlisting ?? [];
     const { scores, errors, complete } = readScores(fd, items);
     if (errors.length) return fail(errors.join(" "));
     const remarks = str(fd, "remarks").slice(0, 4000);
     const submit = str(fd, "intent") === "submit";
     if (submit && !complete) return fail("Score every criterion before you submit.");
-    db.update(reviewAssignments)
+    await db.update(reviewAssignments)
       .set({ scores, remarks, submittedAt: submit ? new Date().toISOString() : null })
       .where(eq(reviewAssignments.id, a.id))
-      .run();
-    audit(user.id, submit ? "review_submitted" : "review_saved", "application", a.applicationId, JSON.stringify(scores));
+      ;
+    await audit(user.id, submit ? "review_submitted" : "review_saved", "application", a.applicationId, JSON.stringify(scores));
     revalidatePath("/review");
     revalidatePath(`/review/${a.id}`);
     revalidatePath(`/admin/applications/${a.applicationId}`);

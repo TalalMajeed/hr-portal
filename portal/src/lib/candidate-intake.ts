@@ -37,29 +37,29 @@ export type IntakeResult = { ok: true; applicationId: number; appNo: string; dup
  * Candidates without an email get a placeholder address and never receive emails.
  */
 export async function createSourcedApplication(c: SourcedCandidate): Promise<IntakeResult> {
-  const position = db.select().from(positions).where(eq(positions.id, c.positionId)).get();
+  const position = (await db.select().from(positions).where(eq(positions.id, c.positionId)))[0];
   if (!position) return { ok: false, error: "That position doesn't exist." };
   if (c.name.trim().length < 2) return { ok: false, error: "A name is needed." };
 
   const email = (c.email ?? "").trim().toLowerCase();
-  let user = email ? db.select().from(users).where(eq(users.email, email)).get() : undefined;
+  let user = email ? (await db.select().from(users).where(eq(users.email, email)))[0] : undefined;
   if (user && user.role !== "candidate") return { ok: false, error: `${email} belongs to a staff account.` };
   if (user) {
-    const existing = db
+    const existing = (await db
       .select()
       .from(applications)
       .where(and(eq(applications.positionId, position.id), eq(applications.candidateId, user.id)))
-      .get();
+      )[0];
     if (existing) return { ok: false, error: `${c.name} has already applied for this post (${existing.appNo ?? "draft"}).` };
   }
 
   if (!user) {
     const address = email || `${slug(c.name) || "candidate"}.${randomBytes(4).toString("hex")}@placeholder.local`;
-    user = db
+    user = (await db
       .insert(users)
       .values({ name: c.name.trim(), email: address, phone: c.phone.trim(), role: "candidate", passwordHash: null, emailVerified: false })
       .returning()
-      .get();
+      )[0];
     const education: Education[] = c.degree
       ? [{ institution: c.institution.trim(), degree: c.degree.trim(), level: c.level || "4", field: c.field.trim(), year: "", grade: "" }]
       : [];
@@ -76,7 +76,7 @@ export async function createSourcedApplication(c: SourcedCandidate): Promise<Int
             },
           ]
         : [];
-    db.insert(candidateProfiles).values({ userId: user.id, cnic: c.cnic.trim(), education, experience }).run();
+    await db.insert(candidateProfiles).values({ userId: user.id, cnic: c.cnic.trim(), education, experience });
   }
 
   if (c.cv) {
@@ -84,12 +84,12 @@ export async function createSourcedApplication(c: SourcedCandidate): Promise<Int
     if (!up.ok) return { ok: false, error: up.error };
   }
 
-  const profile = db.select().from(candidateProfiles).where(eq(candidateProfiles.userId, user.id)).get()!;
-  const docKinds = profileDocuments(user.id).map((d) => d.kind);
-  const eligibility = checkEligibility(getDoc(position.id, "criteria"), profile, docKinds);
+  const profile = (await db.select().from(candidateProfiles).where(eq(candidateProfiles.userId, user.id)))[0]!;
+  const docKinds = (await profileDocuments(user.id)).map((d) => d.kind);
+  const eligibility = checkEligibility(await getDoc(position.id, "criteria"), profile, docKinds);
   const now = new Date().toISOString();
-  const appNo = nextAppNo(position.code, position.id);
-  const app = db
+  const appNo = await nextAppNo(position.code, position.id);
+  const app = (await db
     .insert(applications)
     .values({
       appNo,
@@ -99,15 +99,15 @@ export async function createSourcedApplication(c: SourcedCandidate): Promise<Int
       agencyId: c.agencyId ?? null,
       status: "applied",
       eligibility,
-      snapshot: buildSnapshot(user.id),
+      snapshot: await buildSnapshot(user.id),
       consent: true,
       submittedAt: now,
     })
     .returning()
-    .get();
-  db.insert(applicationStatusHistory).values({ applicationId: app.id, fromStatus: null, toStatus: "applied", note: `Added by ${c.source}`, userId: c.actorId }).run();
-  audit(c.actorId, "application_created", "application", app.id, `${appNo} for ${c.name} (${c.source})`);
-  const dup = detectDuplicate(app.id, c.actorId);
-  setStage(position.id, 4, c.actorId, "Applications received");
+    )[0];
+  await db.insert(applicationStatusHistory).values({ applicationId: app.id, fromStatus: null, toStatus: "applied", note: `Added by ${c.source}`, userId: c.actorId });
+  await audit(c.actorId, "application_created", "application", app.id, `${appNo} for ${c.name} (${c.source})`);
+  const dup = await detectDuplicate(app.id, c.actorId);
+  await setStage(position.id, 4, c.actorId, "Applications received");
   return { ok: true, applicationId: app.id, appNo, duplicateOf: dup?.appNo ?? null };
 }

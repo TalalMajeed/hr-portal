@@ -14,7 +14,7 @@ export const metadata: Metadata = { title: "My reviews" };
 
 export default async function ReviewListPage() {
   const user = await requireUser(["reviewer"]);
-  const rows = db
+  const rows = (await db
     .select({ ra: reviewAssignments, app: applications, position: positions, candidate: users })
     .from(reviewAssignments)
     .innerJoin(applications, eq(applications.id, reviewAssignments.applicationId))
@@ -22,7 +22,7 @@ export default async function ReviewListPage() {
     .innerJoin(users, eq(users.id, applications.candidateId))
     .where(eq(reviewAssignments.reviewerId, user.id))
     .orderBy(asc(positions.title), asc(reviewAssignments.id))
-    .all();
+    );
   const byPosition = new Map<number, { title: string; code: string; rows: typeof rows }>();
   for (const r of rows) {
     const g = byPosition.get(r.position.id) ?? { title: r.position.title, code: r.position.code, rows: [] };

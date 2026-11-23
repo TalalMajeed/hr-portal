@@ -38,8 +38,8 @@ function List({ rows }: { rows: PendingItem[] }) {
 
 export default async function ApprovalsPage() {
   const user = await requireUser(STAFF_ROLES);
-  const visible = visiblePositionIds(user);
-  const items = pendingApprovals().filter((i) => !visible || visible.includes(i.positionId));
+  const visible = await visiblePositionIds(user);
+  const items = (await pendingApprovals()).filter((i) => !visible || visible.includes(i.positionId));
   const mine = items.filter((i) => (i.waitingOn === "ED" ? ["ed", "super_admin"] : ["hr", "super_admin"]).includes(user.role));
   const others = items.filter((i) => !mine.includes(i));
 

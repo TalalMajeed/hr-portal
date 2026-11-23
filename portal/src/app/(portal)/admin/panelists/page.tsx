@@ -21,14 +21,14 @@ export default async function PanelistsPage({ searchParams }: PageProps<"/admin/
   await requireUser(STAFF_ROLES);
   const sp = await searchParams;
   const q = typeof sp.q === "string" ? sp.q.toLowerCase() : "";
-  const people = db.select().from(users).where(eq(users.role, "panel")).orderBy(asc(users.name)).all();
+  const people = (await db.select().from(users).where(eq(users.role, "panel")).orderBy(asc(users.name)));
   const served = new Map(
-    db
+    (await db
       .select({ userId: panelMembers.userId, n: count() })
       .from(panelMembers)
       .where(and(ne(panelMembers.inviteStatus, "replaced"), ne(panelMembers.inviteStatus, "declined")))
       .groupBy(panelMembers.userId)
-      .all()
+      )
       .map((r) => [r.userId, r.n]),
   );
   const shown = people.filter((p) => !q || `${p.name} ${p.organisation} ${p.discipline} ${p.email}`.toLowerCase().includes(q));

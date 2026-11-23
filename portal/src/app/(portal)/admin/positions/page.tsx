@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import Form from "next/form";
-import { and, asc, desc, eq, inArray, like, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import { Plus } from "lucide-react";
 import { db } from "@/lib/db";
 import { adverts, applications, positions } from "@/lib/db/schema";
@@ -23,7 +23,7 @@ export const metadata: Metadata = { title: "Positions" };
 
 export default async function PositionsPage({ searchParams }: PageProps<"/admin/positions">) {
   const user = await requireUser(STAFF_ROLES);
-  closeExpiredAdverts();
+  await closeExpiredAdverts();
   const sp = await searchParams;
   const q = typeof sp.q === "string" ? sp.q.trim() : "";
   const type = typeof sp.type === "string" ? sp.type : "";
@@ -31,26 +31,26 @@ export default async function PositionsPage({ searchParams }: PageProps<"/admin/
   const status = typeof sp.status === "string" ? sp.status : "open";
 
   const where: SQL[] = [];
-  const visible = visiblePositionIds(user);
-  if (visible) where.push(visible.length ? inArray(positions.id, visible) : sql`0`);
-  if (q) where.push(or(like(positions.title, `%${q}%`), like(positions.code, `%${q}%`), like(positions.department, `%${q}%`))!);
+  const visible = await visiblePositionIds(user);
+  if (visible) where.push(visible.length ? inArray(positions.id, visible) : sql`false`);
+  if (q) where.push(or(ilike(positions.title, `%${q}%`), ilike(positions.code, `%${q}%`), ilike(positions.department, `%${q}%`))!);
   if (type === "faculty" || type === "administrative") where.push(eq(positions.type, type));
   if (stage) where.push(eq(positions.stage, Number(stage) as 1));
   if (status === "open") where.push(eq(positions.status, "active"));
   else if (status) where.push(eq(positions.status, status as "active"));
 
-  const rows = db
+  const rows = (await db
     .select({
       p: positions,
       advertStatus: adverts.status,
       closingAt: adverts.closingAt,
-      apps: sql<number>`(select count(*) from ${applications} where ${applications.positionId} = ${positions.id} and ${applications.status} != 'draft')`,
+      apps: sql<number>`(select count(*)::int from ${applications} where ${applications.positionId} = ${positions.id} and ${applications.status} != 'draft')`,
     })
     .from(positions)
     .leftJoin(adverts, eq(adverts.positionId, positions.id))
     .where(where.length ? and(...where) : undefined)
     .orderBy(asc(positions.status), desc(positions.updatedAt))
-    .all();
+    );
 
   const canCreate = ["super_admin", "hr", "hiring_lead"].includes(user.role);
 

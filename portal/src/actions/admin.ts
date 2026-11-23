@@ -29,10 +29,10 @@ export async function createUserAction(_: ActionState, fd: FormData): Promise<Ac
     if (!parsed.success) return fail(parsed.error.issues[0].message);
     const role = parsed.data.role as Role;
     if (!ASSIGNABLE[me.role as "super_admin" | "hr"].includes(role)) return fail("You can't create that kind of account.");
-    if (db.select().from(users).where(eq(users.email, parsed.data.email)).get()) return fail("An account with that email already exists.");
+    if ((await db.select().from(users).where(eq(users.email, parsed.data.email)))[0]) return fail("An account with that email already exists.");
     const external = str(fd, "external") === "on" && ["reviewer", "panel"].includes(role);
     const resetToken = external ? null : newToken();
-    const u = db
+    const u = (await db
       .insert(users)
       .values({
         name: parsed.data.name,
@@ -50,11 +50,11 @@ export async function createUserAction(_: ActionState, fd: FormData): Promise<Ac
         resetExpires: resetToken ? new Date(Date.now() + 7 * 86_400_000).toISOString() : null,
       })
       .returning()
-      .get();
+      )[0];
     if (resetToken) {
-      sendTemplate("password_reset", { email: u.email, userId: u.id }, { name: u.name, link: appUrl(`/reset?token=${resetToken}`) });
+      await sendTemplate("password_reset", { email: u.email, userId: u.id }, { name: u.name, link: appUrl(`/reset?token=${resetToken}`) });
     }
-    audit(me.id, "user_created", "user", u.id, `${u.email} as ${role}${external ? " (external)" : ""}`);
+    await audit(me.id, "user_created", "user", u.id, `${u.email} as ${role}${external ? " (external)" : ""}`);
     revalidatePath("/admin/users");
     return done(external ? `${u.name} added. Copy their secure link from the list.` : `${u.name} added. We emailed them a link to set their password.`);
   });
@@ -63,7 +63,7 @@ export async function createUserAction(_: ActionState, fd: FormData): Promise<Ac
 export async function updateUserAction(_: ActionState, fd: FormData): Promise<ActionState> {
   return safe(async () => {
     const me = await assertUser(["super_admin", "hr"]);
-    const target = db.select().from(users).where(eq(users.id, num(fd, "userId"))).get();
+    const target = (await db.select().from(users).where(eq(users.id, num(fd, "userId"))))[0];
     if (!target || target.role === "candidate") return fail("User not found.");
     const allowed = ASSIGNABLE[me.role as "super_admin" | "hr"];
     if (!allowed.includes(target.role)) return fail("You can't change this account.");
@@ -72,20 +72,20 @@ export async function updateUserAction(_: ActionState, fd: FormData): Promise<Ac
       const role = str(fd, "role") as Role;
       if (!allowed.includes(role)) return fail("You can't give that role.");
       if (target.id === me.id) return fail("You can't change your own role.");
-      db.update(users).set({ role }).where(eq(users.id, target.id)).run();
-      audit(me.id, "role_changed", "user", target.id, `${target.role} to ${role}`);
+      await db.update(users).set({ role }).where(eq(users.id, target.id));
+      await audit(me.id, "role_changed", "user", target.id, `${target.role} to ${role}`);
     } else if (step === "toggle") {
       if (target.id === me.id) return fail("You can't deactivate yourself.");
-      db.update(users).set({ active: !target.active }).where(eq(users.id, target.id)).run();
-      audit(me.id, target.active ? "user_deactivated" : "user_activated", "user", target.id);
+      await db.update(users).set({ active: !target.active }).where(eq(users.id, target.id));
+      await audit(me.id, target.active ? "user_deactivated" : "user_activated", "user", target.id);
     } else if (step === "link") {
-      db.update(users).set({ accessToken: newToken(24) }).where(eq(users.id, target.id)).run();
-      audit(me.id, "secure_link_reissued", "user", target.id);
+      await db.update(users).set({ accessToken: newToken(24) }).where(eq(users.id, target.id));
+      await audit(me.id, "secure_link_reissued", "user", target.id);
     } else if (step === "reset") {
       const token = newToken();
-      db.update(users).set({ resetToken: token, resetExpires: new Date(Date.now() + 86_400_000).toISOString() }).where(eq(users.id, target.id)).run();
-      sendTemplate("password_reset", { email: target.email, userId: target.id }, { name: target.name, link: appUrl(`/reset?token=${token}`) });
-      audit(me.id, "password_reset_sent", "user", target.id);
+      await db.update(users).set({ resetToken: token, resetExpires: new Date(Date.now() + 86_400_000).toISOString() }).where(eq(users.id, target.id));
+      await sendTemplate("password_reset", { email: target.email, userId: target.id }, { name: target.name, link: appUrl(`/reset?token=${token}`) });
+      await audit(me.id, "password_reset_sent", "user", target.id);
     } else return fail("Unknown action.");
     revalidatePath("/admin/users");
     return done({ role: "Role changed.", toggle: target.active ? "Account deactivated." : "Account activated.", link: "New secure link issued. The old one no longer works.", reset: "Password reset email sent." }[step]);
@@ -100,8 +100,8 @@ export async function saveEmailTemplateAction(_: ActionState, fd: FormData): Pro
     const subject = str(fd, "subject");
     const body = str(fd, "body");
     if (!subject || body.length < 10) return fail("The subject and body can't be empty.");
-    db.update(emailTemplates).set({ subject, body, updatedAt: new Date().toISOString() }).where(eq(emailTemplates.key, key)).run();
-    audit(me.id, "email_template_saved", "email_template", null, key);
+    await db.update(emailTemplates).set({ subject, body, updatedAt: new Date().toISOString() }).where(eq(emailTemplates.key, key));
+    await audit(me.id, "email_template_saved", "email_template", null, key);
     revalidatePath("/admin/templates");
     return done("Template saved.");
   });
@@ -124,9 +124,9 @@ export async function saveJdTemplateAction(_: ActionState, fd: FormData): Promis
     };
     const type = str(fd, "type") === "faculty" ? "faculty" : "administrative";
     const id = num(fd, "templateId");
-    if (id) db.update(jdTemplates).set({ name, type, content }).where(eq(jdTemplates.id, id)).run();
-    else db.insert(jdTemplates).values({ name, type, content }).run();
-    audit(me.id, "jd_template_saved", "jd_template", id || null, name);
+    if (id) await db.update(jdTemplates).set({ name, type, content }).where(eq(jdTemplates.id, id));
+    else await db.insert(jdTemplates).values({ name, type, content });
+    await audit(me.id, "jd_template_saved", "jd_template", id || null, name);
     revalidatePath("/admin/templates");
     return done("JD template saved.");
   });
@@ -136,8 +136,8 @@ export async function deleteJdTemplateAction(_: ActionState, fd: FormData): Prom
   return safe(async () => {
     const me = await assertUser(["super_admin", "hr"]);
     const id = num(fd, "templateId");
-    db.delete(jdTemplates).where(eq(jdTemplates.id, id)).run();
-    audit(me.id, "jd_template_deleted", "jd_template", id);
+    await db.delete(jdTemplates).where(eq(jdTemplates.id, id));
+    await audit(me.id, "jd_template_deleted", "jd_template", id);
     revalidatePath("/admin/templates");
     return done("Template deleted.");
   });
@@ -147,14 +147,14 @@ export async function saveSettingsAction(_: ActionState, fd: FormData): Promise<
   return safe(async () => {
     const me = await assertUser(["super_admin"]);
     const mb = num(fd, "max_upload_mb");
-    if (mb < 1 || mb > 20) return fail("The upload limit must be between 1 and 20 MB.");
+    if (mb < 1 || mb > 4) return fail("The upload limit must be between 1 and 4 MB. Vercel accepts at most 4.5 MB per request.");
     const months = num(fd, "retention_months");
     if (months < 6 || months > 120) return fail("Keep data for between 6 and 120 months.");
     const values = { max_upload_mb: String(mb), retention_months: String(months), from_address: str(fd, "from_address") || "careers@du.edu.pk" };
     for (const [key, value] of Object.entries(values)) {
-      db.insert(settings).values({ key, value }).onConflictDoUpdate({ target: settings.key, set: { value } }).run();
+      await db.insert(settings).values({ key, value }).onConflictDoUpdate({ target: settings.key, set: { value } });
     }
-    audit(me.id, "settings_saved", "settings", null, JSON.stringify(values));
+    await audit(me.id, "settings_saved", "settings", null, JSON.stringify(values));
     revalidatePath("/admin/settings");
     return done("Settings saved.");
   });

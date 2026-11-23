@@ -1,0 +1,6 @@
+.env*
+!.env.example
+.admin-credentials
+data
+.next
+node_modules

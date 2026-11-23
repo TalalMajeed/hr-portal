@@ -69,8 +69,8 @@ function JdTemplateForm({ t }: { t?: typeof jdTemplates.$inferSelect }) {
 
 export default async function TemplatesPage() {
   await requireUser(["super_admin", "hr"]);
-  const emails = db.select().from(emailTemplates).orderBy(asc(emailTemplates.name)).all();
-  const jds = db.select().from(jdTemplates).orderBy(asc(jdTemplates.name)).all();
+  const emails = (await db.select().from(emailTemplates).orderBy(asc(emailTemplates.name)));
+  const jds = (await db.select().from(jdTemplates).orderBy(asc(jdTemplates.name)));
   return (
     <>
       <PageHeader title="Templates" description="The automatic emails candidates and panel members receive, and the job description templates." />

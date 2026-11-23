@@ -32,14 +32,14 @@ export default async function ReportsPage({ searchParams }: PageProps<"/admin/re
   const user = await requireUser(STAFF_ROLES);
   const sp = await searchParams;
   const key = typeof sp.r === "string" && REPORTS[sp.r] ? sp.r : "summary";
-  const scope = visiblePositionIds(user);
-  const table = REPORTS[key](scope);
-  const posList = db
+  const scope = await visiblePositionIds(user);
+  const table = await REPORTS[key](scope);
+  const posList = (await db
     .select({ id: positions.id, code: positions.code, title: positions.title })
     .from(positions)
     .where(scope ? inArray(positions.id, scope.length ? scope : [-1]) : undefined)
     .orderBy(asc(positions.code))
-    .all();
+    );
 
   return (
     <>

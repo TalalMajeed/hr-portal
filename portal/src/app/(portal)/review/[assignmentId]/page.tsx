@@ -26,14 +26,14 @@ export const metadata: Metadata = { title: "Review application" };
 export default async function ReviewPage({ params }: PageProps<"/review/[assignmentId]">) {
   const user = await requireUser(["reviewer"]);
   const { assignmentId } = await params;
-  const ra = db.select().from(reviewAssignments).where(eq(reviewAssignments.id, Number(assignmentId))).get();
+  const ra = (await db.select().from(reviewAssignments).where(eq(reviewAssignments.id, Number(assignmentId))))[0];
   if (!ra || ra.reviewerId !== user.id) notFound();
-  const app = db.select().from(applications).where(eq(applications.id, ra.applicationId)).get()!;
-  const position = db.select().from(positions).where(eq(positions.id, app.positionId)).get()!;
-  const advert = db.select().from(adverts).where(eq(adverts.positionId, position.id)).get();
-  const items = getDoc(position.id, "rubric")?.shortlisting ?? [];
-  const criteria = getDoc(position.id, "criteria")?.items ?? [];
-  audit(user.id, "viewed", "application", app.id, `review ${ra.id}`);
+  const app = (await db.select().from(applications).where(eq(applications.id, ra.applicationId)))[0]!;
+  const position = (await db.select().from(positions).where(eq(positions.id, app.positionId)))[0]!;
+  const advert = (await db.select().from(adverts).where(eq(adverts.positionId, position.id)))[0];
+  const items = (await getDoc(position.id, "rubric"))?.shortlisting ?? [];
+  const criteria = (await getDoc(position.id, "criteria"))?.items ?? [];
+  await audit(user.id, "viewed", "application", app.id, `review ${ra.id}`);
   const locked = !!ra.submittedAt;
 
   return (

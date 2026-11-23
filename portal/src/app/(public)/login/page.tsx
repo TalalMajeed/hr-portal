@@ -9,7 +9,6 @@ import { ActionForm } from "@/components/ui/action-form";
 import { Field, Input } from "@/components/ui/field";
 import { SubmitButton } from "@/components/ui/submit-button";
 import { Notice } from "@/components/ui/notice";
-import { DemoLogins } from "@/components/auth/demo-logins";
 
 export const metadata: Metadata = { title: "Sign in" };
 
@@ -46,7 +45,6 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
           </Link>
         </div>
       </ActionForm>
-      <DemoLogins />
     </AuthCard>
   );
 }

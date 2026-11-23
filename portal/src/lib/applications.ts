@@ -16,24 +16,24 @@ import { audit } from "@/lib/audit";
 import { sendTemplate } from "@/lib/email";
 
 /** "DU-2026-003-0007" */
-export function nextAppNo(positionCode: string, positionId: number) {
-  const row = db
-    .select({ n: sql<number>`count(*)` })
+export async function nextAppNo(positionCode: string, positionId: number) {
+  const row = (await db
+    .select({ n: sql<number>`count(*)::int` })
     .from(applications)
     .where(sql`${applications.positionId} = ${positionId} and ${applications.appNo} is not null`)
-    .get();
+    )[0];
   return `${positionCode}-${String((row?.n ?? 0) + 1).padStart(4, "0")}`;
 }
 
 /** C8: freezes the profile and documents as they are now. */
-export function buildSnapshot(candidateId: number): ProfileSnapshot {
-  const user = db.select().from(users).where(eq(users.id, candidateId)).get();
-  const profile = db.select().from(candidateProfiles).where(eq(candidateProfiles.userId, candidateId)).get();
-  const docs = db
+export async function buildSnapshot(candidateId: number): Promise<ProfileSnapshot> {
+  const user = (await db.select().from(users).where(eq(users.id, candidateId)))[0];
+  const profile = (await db.select().from(candidateProfiles).where(eq(candidateProfiles.userId, candidateId)))[0];
+  const docs = (await db
     .select({ id: documents.id, kind: documents.kind, filename: documents.filename })
     .from(documents)
     .where(sql`${documents.ownerUserId} = ${candidateId} and ${documents.applicationId} is null`)
-    .all();
+    );
   const { id: _id, userId: _u, updatedAt: _t, ...rest } = profile ?? emptyProfile(candidateId);
   void _id;
   void _u;
@@ -67,28 +67,28 @@ export function emptyProfile(userId: number): typeof candidateProfiles.$inferSel
  * C10: changes the status the candidate sees, records it, and emails the candidate.
  * Pass `notify: false` for silent internal changes.
  */
-export function setApplicationStatus(
+export async function setApplicationStatus(
   applicationId: number,
   to: ApplicationStatus,
   userId: number | null,
   opts: { note?: string; notify?: boolean; message?: string } = {},
 ) {
-  const app = db
+  const app = (await db
     .select({ app: applications, position: positions, candidate: users })
     .from(applications)
     .innerJoin(positions, eq(positions.id, applications.positionId))
     .innerJoin(users, eq(users.id, applications.candidateId))
     .where(eq(applications.id, applicationId))
-    .get();
+    )[0];
   if (!app || app.app.status === to) return;
   const now = new Date().toISOString();
-  db.update(applications).set({ status: to, updatedAt: now }).where(eq(applications.id, applicationId)).run();
-  db.insert(applicationStatusHistory)
+  await db.update(applications).set({ status: to, updatedAt: now }).where(eq(applications.id, applicationId));
+  await db.insert(applicationStatusHistory)
     .values({ applicationId, fromStatus: app.app.status, toStatus: to, note: opts.note ?? "", userId })
-    .run();
-  audit(userId, "status_changed", "application", applicationId, `${app.app.status} to ${to}${opts.note ? `: ${opts.note}` : ""}`);
+    ;
+  await audit(userId, "status_changed", "application", applicationId, `${app.app.status} to ${to}${opts.note ? `: ${opts.note}` : ""}`);
   if (opts.notify !== false && !app.candidate.email.endsWith("@placeholder.local")) {
-    sendTemplate(
+    await sendTemplate(
       "status_changed",
       { email: app.candidate.email, userId: app.candidate.id },
       {

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Form from "next/form";
-import { and, asc, eq, like, ne, or, type SQL } from "drizzle-orm";
+import { and, asc, eq, ilike, ne, or, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users, type Role } from "@/lib/db/schema";
 import { requireUser } from "@/lib/auth";
@@ -43,8 +43,8 @@ export default async function UsersPage({ searchParams }: PageProps<"/admin/user
   const q = typeof sp.q === "string" ? sp.q.trim() : "";
   const where: SQL[] = [ne(users.role, "candidate")];
   if (role) where.push(eq(users.role, role as Role));
-  if (q) where.push(or(like(users.name, `%${q}%`), like(users.email, `%${q}%`), like(users.organisation, `%${q}%`))!);
-  const rows = db.select().from(users).where(and(...where)).orderBy(asc(users.role), asc(users.name)).all();
+  if (q) where.push(or(ilike(users.name, `%${q}%`), ilike(users.email, `%${q}%`), ilike(users.organisation, `%${q}%`))!);
+  const rows = (await db.select().from(users).where(and(...where)).orderBy(asc(users.role), asc(users.name)));
 
   return (
     <>

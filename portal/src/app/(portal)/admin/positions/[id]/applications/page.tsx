@@ -58,23 +58,23 @@ export default async function ApplicationsPage({ params, searchParams }: PagePro
     sort: (one(sp.sort) || "submitted_desc") as keyof typeof SORTS,
   };
 
-  const rows = db
+  const rows = (await db
     .select({ app: applications, candidate: users })
     .from(applications)
     .innerJoin(users, eq(users.id, applications.candidateId))
     .where(and(eq(applications.positionId, position.id), ne(applications.status, "draft")))
     .orderBy(asc(applications.submittedAt))
-    .all();
+    );
   const appIds = rows.map((r) => r.app.id);
   const reviews = appIds.length
-    ? db
+    ? (await db
         .select({ ra: reviewAssignments, reviewer: users })
         .from(reviewAssignments)
         .innerJoin(users, eq(users.id, reviewAssignments.reviewerId))
         .where(inArray(reviewAssignments.applicationId, appIds))
-        .all()
+        )
     : [];
-  const items = getDoc(position.id, "rubric")?.shortlisting ?? [];
+  const items = (await getDoc(position.id, "rubric"))?.shortlisting ?? [];
   const duplicateTargets = new Set(rows.map((r) => r.app.duplicateOfId).filter(Boolean));
 
   const enriched = rows.map(({ app, candidate }) => {
@@ -137,7 +137,7 @@ export default async function ApplicationsPage({ params, searchParams }: PagePro
       }
     });
 
-  const reviewerList = db.select().from(users).where(and(eq(users.role, "reviewer"), eq(users.active, true))).orderBy(asc(users.name)).all();
+  const reviewerList = (await db.select().from(users).where(and(eq(users.role, "reviewer"), eq(users.active, true))).orderBy(asc(users.name)));
   const anyFilter = Object.entries(f).some(([k, v]) => k !== "sort" && v);
   const base = `/admin/positions/${position.id}/applications`;
 

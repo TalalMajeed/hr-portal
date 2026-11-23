@@ -10,15 +10,15 @@ import { Badge } from "@/components/ui/badge";
 
 export const dynamic = "force-dynamic";
 
-export default function HomePage() {
-  const open = db
+export default async function HomePage() {
+  const open = (await db
     .select({ p: positions, a: adverts })
     .from(adverts)
     .innerJoin(positions, eq(positions.id, adverts.positionId))
     .where(and(eq(adverts.status, "published"), gt(adverts.closingAt, new Date().toISOString())))
     .orderBy(asc(adverts.closingAt))
     .limit(6)
-    .all();
+    );
 
   return (
     <>

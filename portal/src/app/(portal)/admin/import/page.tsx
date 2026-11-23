@@ -12,7 +12,7 @@ export const metadata: Metadata = { title: "Import candidates" };
 
 export default async function ImportPage() {
   await requireUser(["hr", "super_admin"]);
-  const list = db.select().from(positions).where(eq(positions.approvalStatus, "approved")).orderBy(desc(positions.id)).all();
+  const list = (await db.select().from(positions).where(eq(positions.approvalStatus, "approved")).orderBy(desc(positions.id)));
   return (
     <>
       <PageHeader

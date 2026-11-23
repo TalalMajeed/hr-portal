@@ -33,12 +33,12 @@ export default async function DaySchedulePage({ searchParams }: PageProps<"/admi
   const user = await requireUser(STAFF_ROLES);
   const sp = await searchParams;
   const day = typeof sp.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : pktToday();
-  const sent = runDueReminders();
+  const sent = await runDueReminders();
 
   const start = new Date(`${day}T00:00:00+05:00`).toISOString();
   const end = new Date(`${shift(day, 1)}T00:00:00+05:00`).toISOString();
-  const visible = visiblePositionIds(user);
-  const rows = db
+  const visible = await visiblePositionIds(user);
+  const rows = (await db
     .select({ e: events, p: positions, a: applications, c: users, tz: candidateProfiles.timezone })
     .from(events)
     .innerJoin(positions, eq(positions.id, events.positionId))
@@ -54,9 +54,9 @@ export default async function DaySchedulePage({ searchParams }: PageProps<"/admi
       ),
     )
     .orderBy(asc(events.startsAt))
-    .all();
+    );
 
-  const withPanel = rows.map((r) => ({ ...r, panel: eventPanelists(r.e).map((m) => m.user) }));
+  const withPanel = await Promise.all(rows.map(async (r) => ({ ...r, panel: (await eventPanelists(r.e)).map((m) => m.user) })));
   const clashes = new Map<number, string[]>();
   for (let i = 0; i < withPanel.length; i++) {
     for (let j = i + 1; j < withPanel.length; j++) {

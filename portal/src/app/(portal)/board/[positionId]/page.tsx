@@ -13,9 +13,9 @@ export const metadata: Metadata = { title: "Board pack" };
 
 export default async function BoardPackPage({ params }: PageProps<"/board/[positionId]">) {
   const user = await requireUser(["board", "super_admin"]);
-  const pack = getBoardPack(Number((await params).positionId));
+  const pack = await getBoardPack(Number((await params).positionId));
   if (!pack || pack.position.stage !== 10 || !pack.board?.packGeneratedAt) notFound();
-  audit(user.id, "board_pack_viewed", "position", pack.position.id);
+  await audit(user.id, "board_pack_viewed", "position", pack.position.id);
   return (
     <>
       <PageHeader

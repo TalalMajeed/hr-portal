@@ -15,9 +15,9 @@ import { done, fail, num, safe, str, type ActionState } from "@/lib/action-state
 
 async function context(fd: FormData, roles: Role[] = ["super_admin", "hr", "ed", "hiring_lead"]) {
   const user = await assertUser(roles);
-  const p = getPosition(num(fd, "id"));
+  const p = await getPosition(num(fd, "id"));
   if (!p || !canManagePosition(user, p)) throw new Error("Position not found.");
-  const ad = db.select().from(adverts).where(eq(adverts.positionId, p.id)).get() ?? null;
+  const ad = (await db.select().from(adverts).where(eq(adverts.positionId, p.id)))[0] ?? null;
   return { user, p, ad };
 }
 
@@ -45,22 +45,22 @@ export async function generateAdvertAction(_: ActionState, fd: FormData): Promis
     const { user, p, ad } = await context(fd, ["super_admin", "hr"]);
     if (p.approvalStatus !== "approved") return fail("The ED must approve the position before it can be advertised.");
     const closingAt = ad?.closingAt ?? new Date(Date.now() + 21 * 86_400_000).toISOString();
-    const body = generateAdvertBody(p, getDoc(p.id, "jd"), getDoc(p.id, "criteria"), closingAt);
+    const body = generateAdvertBody(p, await getDoc(p.id, "jd"), await getDoc(p.id, "criteria"), closingAt);
     if (ad) {
       if (ad.status === "published") return fail("Unpublish the ad before rebuilding its text.");
-      db.update(adverts).set({ body, updatedAt: new Date().toISOString() }).where(eq(adverts.id, ad.id)).run();
+      await db.update(adverts).set({ body, updatedAt: new Date().toISOString() }).where(eq(adverts.id, ad.id));
     } else {
       const faculty = p.type === "faculty";
-      db.insert(adverts)
+      await db.insert(adverts)
         .values({
           positionId: p.id,
           body,
           closingAt,
           questions: faculty ? [{ key: "q1", label: "When could you join if selected?", required: true }] : [{ key: "q1", label: "What is your notice period?", required: true }],
         })
-        .run();
+        ;
     }
-    audit(user.id, "advert_generated", "position", p.id);
+    await audit(user.id, "advert_generated", "position", p.id);
     refresh(p.id);
     return done("Ad text generated from the job description. Edit it below before publishing.");
   });
@@ -75,7 +75,7 @@ export async function saveAdvertAction(_: ActionState, fd: FormData): Promise<Ac
     if (!closingAt) return fail("Set the closing date and time.", { closingAt: "Set the closing date and time." });
     const body = str(fd, "body");
     if (body.length < 50) return fail("The ad text is too short.");
-    db.update(adverts)
+    await db.update(adverts)
       .set({
         body,
         closingAt,
@@ -84,10 +84,10 @@ export async function saveAdvertAction(_: ActionState, fd: FormData): Promise<Ac
         updatedAt: new Date().toISOString(),
       })
       .where(eq(adverts.id, ad.id))
-      .run();
+      ;
     const mode = str(fd, "eligibilityMode") === "block" ? "block" : "flag";
-    db.update(positions).set({ eligibilityMode: mode }).where(eq(positions.id, p.id)).run();
-    audit(user.id, "advert_saved", "position", p.id);
+    await db.update(positions).set({ eligibilityMode: mode }).where(eq(positions.id, p.id));
+    await audit(user.id, "advert_saved", "position", p.id);
     refresh(p.id);
     return done("Ad saved.");
   });
@@ -103,53 +103,53 @@ export async function advertStatusAction(_: ActionState, fd: FormData): Promise<
     const isHr = ["hr", "super_admin"].includes(user.role);
     const isEd = ["ed", "super_admin"].includes(user.role);
     const now = new Date().toISOString();
-    const set = (status: typeof ad.status, extra: Partial<typeof adverts.$inferInsert> = {}) =>
-      db.update(adverts).set({ status, updatedAt: now, ...extra }).where(eq(adverts.id, ad.id)).run();
+    const set = async (status: typeof ad.status, extra: Partial<typeof adverts.$inferInsert> = {}) =>
+      await db.update(adverts).set({ status, updatedAt: now, ...extra }).where(eq(adverts.id, ad.id));
 
     switch (step) {
       case "submit":
         if (!isHr || !["draft", "unpublished"].includes(ad.status)) return fail("That step isn't available now.");
-        set("pending_approval");
-        db.insert(approvals).values({ positionId: p.id, subject: "advert", action: "submitted", comment, userId: user.id }).run();
-        for (const ed of db.select().from(users).where(eq(users.role, "ed")).all()) {
-          sendEmail({ email: ed.email, userId: ed.id }, `Ad for approval: ${p.title}`, `${user.name} sent the ad for ${p.code} ${p.title} for your approval.`, { positionId: p.id });
+        await set("pending_approval");
+        await db.insert(approvals).values({ positionId: p.id, subject: "advert", action: "submitted", comment, userId: user.id });
+        for (const ed of (await db.select().from(users).where(eq(users.role, "ed")))) {
+          await sendEmail({ email: ed.email, userId: ed.id }, `Ad for approval: ${p.title}`, `${user.name} sent the ad for ${p.code} ${p.title} for your approval.`, { positionId: p.id });
         }
         break;
       case "approve":
         if (!isEd || ad.status !== "pending_approval") return fail("That step isn't available now.");
         if (ad.closingAt <= now) return fail("The closing date has passed. Ask HR to set a new one.");
-        set("published", { publishedAt: now });
-        db.insert(approvals).values({ positionId: p.id, subject: "advert", action: "ed_approved", comment, userId: user.id }).run();
-        db.insert(advertRuns).values({ positionId: p.id, channel: "DU careers page", runDate: now.slice(0, 10), createdBy: user.id }).run();
-        setStage(p.id, 3, user.id, "Ad published");
+        await set("published", { publishedAt: now });
+        await db.insert(approvals).values({ positionId: p.id, subject: "advert", action: "ed_approved", comment, userId: user.id });
+        await db.insert(advertRuns).values({ positionId: p.id, channel: "DU careers page", runDate: now.slice(0, 10), createdBy: user.id });
+        await setStage(p.id, 3, user.id, "Ad published");
         break;
       case "return":
         if (!isEd || ad.status !== "pending_approval") return fail("That step isn't available now.");
         if (!comment) return fail("Say what needs to change.");
-        set("draft");
-        db.insert(approvals).values({ positionId: p.id, subject: "advert", action: "returned", comment, userId: user.id }).run();
+        await set("draft");
+        await db.insert(approvals).values({ positionId: p.id, subject: "advert", action: "returned", comment, userId: user.id });
         break;
       case "unpublish":
         if (!isHr || ad.status !== "published") return fail("That step isn't available now.");
-        set("unpublished");
+        await set("unpublished");
         break;
       case "republish":
         if (!isHr || ad.status !== "unpublished") return fail("That step isn't available now.");
         if (ad.closingAt <= now) return fail("The closing date has passed. Extend it first.");
-        set("published");
+        await set("published");
         break;
       case "close":
         if (!isHr || !["published", "unpublished"].includes(ad.status)) return fail("That step isn't available now.");
-        set("closed", { closingAt: ad.closingAt > now ? now : ad.closingAt });
+        await set("closed", { closingAt: ad.closingAt > now ? now : ad.closingAt });
         break;
       case "archive":
         if (!isHr || ad.status !== "closed") return fail("Close the ad before archiving it.");
-        set("archived");
+        await set("archived");
         break;
       default:
         return fail("Unknown step.");
     }
-    audit(user.id, `advert_${step}`, "position", p.id, comment);
+    await audit(user.id, `advert_${step}`, "position", p.id, comment);
     refresh(p.id);
     return done(
       {
@@ -174,11 +174,11 @@ export async function advertLifecycleAction(_: ActionState, fd: FormData): Promi
     if (!reason) return fail("Give the reason. It is kept in the position's history.");
     const now = new Date().toISOString();
     if (kind === "withdraw") {
-      db.update(positions).set({ status: "withdrawn", updatedAt: now }).where(eq(positions.id, p.id)).run();
+      await db.update(positions).set({ status: "withdrawn", updatedAt: now }).where(eq(positions.id, p.id));
       if (ad && ["published", "pending_approval", "unpublished"].includes(ad.status)) {
-        db.update(adverts).set({ status: "closed", closingAt: now, updatedAt: now }).where(eq(adverts.id, ad.id)).run();
+        await db.update(adverts).set({ status: "closed", closingAt: now, updatedAt: now }).where(eq(adverts.id, ad.id));
       }
-      logPositionEvent(p.id, "withdrawn", reason, user.id);
+      await logPositionEvent(p.id, "withdrawn", reason, user.id);
       refresh(p.id);
       return done("Position withdrawn.");
     }
@@ -187,16 +187,16 @@ export async function advertLifecycleAction(_: ActionState, fd: FormData): Promi
     if (!closingAt || closingAt <= now) return fail("Pick a new closing date in the future.");
     if (kind === "extend") {
       if (!["published", "closed", "unpublished"].includes(ad.status)) return fail("Only a published or closed ad can be extended.");
-      db.update(adverts)
+      await db.update(adverts)
         .set({ closingAt, status: ad.status === "closed" ? "published" : ad.status, updatedAt: now })
         .where(eq(adverts.id, ad.id))
-        .run();
-      logPositionEvent(p.id, "extended", `${reason} (new closing date ${closingAt.slice(0, 10)})`, user.id);
+        ;
+      await logPositionEvent(p.id, "extended", `${reason} (new closing date ${closingAt.slice(0, 10)})`, user.id);
     } else if (kind === "readvertise") {
-      db.update(adverts).set({ closingAt, status: "pending_approval", publishedAt: null, updatedAt: now }).where(eq(adverts.id, ad.id)).run();
-      db.update(positions).set({ status: "active" }).where(eq(positions.id, p.id)).run();
-      db.insert(approvals).values({ positionId: p.id, subject: "advert", action: "submitted", comment: `Re-advertise: ${reason}`, userId: user.id }).run();
-      logPositionEvent(p.id, "readvertised", reason, user.id);
+      await db.update(adverts).set({ closingAt, status: "pending_approval", publishedAt: null, updatedAt: now }).where(eq(adverts.id, ad.id));
+      await db.update(positions).set({ status: "active" }).where(eq(positions.id, p.id));
+      await db.insert(approvals).values({ positionId: p.id, subject: "advert", action: "submitted", comment: `Re-advertise: ${reason}`, userId: user.id });
+      await logPositionEvent(p.id, "readvertised", reason, user.id);
     } else {
       return fail("Unknown action.");
     }
@@ -212,8 +212,8 @@ export async function addAdvertRunAction(_: ActionState, fd: FormData): Promise<
     const channel = str(fd, "channel");
     const runDate = str(fd, "runDate");
     if (!channel || !runDate) return fail("Pick the channel and the date it ran.");
-    db.insert(advertRuns).values({ positionId: p.id, channel, runDate, notes: str(fd, "notes"), createdBy: user.id }).run();
-    audit(user.id, "advert_run", "position", p.id, `${channel} on ${runDate}`);
+    await db.insert(advertRuns).values({ positionId: p.id, channel, runDate, notes: str(fd, "notes"), createdBy: user.id });
+    await audit(user.id, "advert_run", "position", p.id, `${channel} on ${runDate}`);
     refresh(p.id);
     return done("Recorded.");
   });
@@ -224,21 +224,21 @@ export async function closingRemindersAction(_: ActionState, fd: FormData): Prom
   return safe(async () => {
     const { user, p, ad } = await context(fd, ["super_admin", "hr"]);
     if (!ad || ad.status !== "published") return fail("The ad isn't published.");
-    const drafts = db
+    const drafts = (await db
       .select({ a: applications, u: users })
       .from(applications)
       .innerJoin(users, eq(users.id, applications.candidateId))
       .where(and(eq(applications.positionId, p.id), eq(applications.status, "draft")))
-      .all();
+      );
     for (const { a, u } of drafts) {
-      sendTemplate(
+      await sendTemplate(
         "closing_reminder",
         { email: u.email, userId: u.id },
         { name: u.name, position: p.title, closing: formatDateTime(ad.closingAt) + " PKT", link: appUrl(`/me/apply/${p.code}`) },
         { applicationId: a.id, positionId: p.id },
       );
     }
-    audit(user.id, "closing_reminders", "position", p.id, `${drafts.length} sent`);
+    await audit(user.id, "closing_reminders", "position", p.id, `${drafts.length} sent`);
     return done(drafts.length ? `Reminders sent to ${drafts.length} ${drafts.length === 1 ? "candidate" : "candidates"}.` : "Nobody has an unfinished application.");
   });
 }

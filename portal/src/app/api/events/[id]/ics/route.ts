@@ -13,18 +13,18 @@ export async function GET(request: Request, ctx: RouteContext<"/api/events/[id]/
   const user = await getUser();
   if (!user) return new Response("Sign in to download this invitation.", { status: 401 });
   const { id } = await ctx.params;
-  const r = loadEvent(Number(id));
+  const r = await loadEvent(Number(id));
   if (!r) return new Response("Session not found.", { status: 404 });
   const e = r.event;
 
   let allowed = r.candidate.id === user.id;
   if (!allowed && STAFF_ROLES.includes(user.role)) allowed = canManagePosition(user, r.position);
   if (!allowed && user.role === "panel" && e.panelId) {
-    allowed = !!db
+    allowed = !!(await db
       .select()
       .from(panelMembers)
       .where(and(eq(panelMembers.panelId, e.panelId), eq(panelMembers.userId, user.id), eq(panelMembers.inviteStatus, "accepted")))
-      .get();
+      )[0];
   }
   if (!allowed) return new Response("You don't have access to this session.", { status: 403 });
   if (e.status !== "confirmed") return new Response("Only confirmed sessions go on calendars.", { status: 409 });
@@ -42,7 +42,7 @@ export async function GET(request: Request, ctx: RouteContext<"/api/events/[id]/
     organizer: { name: "DU Human Resources", email: FROM_ADDRESS },
     attendees: [
       ...(r.candidate.email.endsWith("@placeholder.local") ? [] : [{ name: r.candidate.name, email: r.candidate.email }]),
-      ...eventPanelists(e).map((m) => ({ name: m.user.name, email: m.user.email })),
+      ...(await eventPanelists(e)).map((m) => ({ name: m.user.name, email: m.user.email })),
     ],
   });
   return new Response(ics, {

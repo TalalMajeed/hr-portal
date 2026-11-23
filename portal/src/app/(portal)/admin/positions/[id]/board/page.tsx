@@ -39,28 +39,28 @@ const OFFER_TONE = { sent: "warning", accepted: "success", declined: "danger", w
 export default async function BoardTab({ params }: PageProps<"/admin/positions/[id]/board">) {
   const user = await requireUser(STAFF_ROLES);
   const p = await positionForPage(user, (await params).id);
-  const pack = getBoardPack(p.id)!;
+  const pack = (await getBoardPack(p.id))!;
   const b = pack.board;
   const isHr = ["hr", "super_admin"].includes(user.role);
   const isEd = ["ed", "super_admin"].includes(user.role);
   const canEdit = isHr || isEd;
 
   const regretted = new Set(
-    db
+    (await db
       .select({ id: emails.applicationId })
       .from(emails)
       .where(and(eq(emails.positionId, p.id), eq(emails.templateKey, "regret")))
-      .all()
+      )
       .map((e) => e.id),
   );
   const offered = new Set(pack.candidates.filter((c) => c.offer).map((c) => c.applicationId));
   const recommended = new Set(pack.candidates.filter((c) => c.decision?.decision === "recommended").map((c) => c.applicationId));
-  const regretPool = db
+  const regretPool = (await db
     .select({ a: applications, name: users.name })
     .from(applications)
     .innerJoin(users, eq(users.id, applications.candidateId))
     .where(and(eq(applications.positionId, p.id), inArray(applications.status, ["applied", "under_review", "shortlisted", "interview_scheduled", "talk_scheduled", "not_selected"])))
-    .all()
+    )
     .filter((r) => !offered.has(r.a.id) && !recommended.has(r.a.id));
   const declined = pack.candidates.some((c) => c.offer?.status === "declined");
 

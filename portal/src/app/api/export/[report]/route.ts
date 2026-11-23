@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { db, sqlite } from "@/lib/db";
+import { db, pool } from "@/lib/db";
 import { positions } from "@/lib/db/schema";
 import { getUser } from "@/lib/auth";
 import { canManagePosition, visiblePositionIds } from "@/lib/access";
@@ -25,13 +25,13 @@ export async function GET(request: Request, ctx: RouteContext<"/api/export/[repo
   let name = report;
 
   if (report === "applications" || report === "board") {
-    const p = db.select().from(positions).where(eq(positions.id, Number(url.searchParams.get("position")))).get();
+    const p = (await db.select().from(positions).where(eq(positions.id, Number(url.searchParams.get("position")))))[0];
     if (!p || !canManagePosition(user, p)) return new Response("Not found", { status: 404 });
     name = `${p.code}-${report}`;
     if (report === "applications") {
-      tables = [applicationsReport(p.id)];
+      tables = [await applicationsReport(p.id)];
     } else {
-      const pack = getBoardPack(p.id)!;
+      const pack = (await getBoardPack(p.id))!;
       const rounds = (["interview", "talk", "second_round"] as PanelRound[]).filter((r) => pack.candidates.some((c) => c.rounds[r]));
       tables = [
         {
@@ -55,21 +55,32 @@ export async function GET(request: Request, ctx: RouteContext<"/api/export/[repo
     }
   } else if (report === "all") {
     if (!["super_admin", "ed"].includes(user.role)) return new Response("Only the super admin or ED can export all data.", { status: 403 });
-    const names = (sqlite.prepare("select name from sqlite_master where type='table' and name not like 'sqlite_%' and name not in ('auth_sessions')").all() as { name: string }[]).map((r) => r.name);
-    tables = names.map((t) => {
-      const rows = sqlite.prepare(`select * from "${t}"`).all() as Record<string, unknown>[];
-      const columns = rows[0] ? Object.keys(rows[0]).filter((c) => !["password_hash", "access_token", "verify_token", "reset_token"].includes(c)) : [];
-      return { key: t, title: t, description: `${rows.length} rows`, columns, rows: rows.map((r) => columns.map((c) => (r[c] === null ? "" : (r[c] as string | number)))) };
-    });
+    const SKIP = new Set(["auth_sessions", "document_files", "__drizzle_migrations"]);
+    const HIDDEN = new Set(["password_hash", "access_token", "verify_token", "reset_token"]);
+    const names = (await pool.query<{ table_name: string }>("select table_name from information_schema.tables where table_schema = 'public' order by table_name")).rows
+      .map((r) => r.table_name)
+      .filter((t) => !SKIP.has(t));
+    tables = [];
+    for (const t of names) {
+      const { rows, fields } = await pool.query(`select * from "${t.replace(/"/g, "")}" order by 1`);
+      const columns = fields.map((f) => f.name).filter((c) => !HIDDEN.has(c));
+      tables.push({
+        key: t,
+        title: t,
+        description: `${rows.length} rows`,
+        columns,
+        rows: rows.map((r: Record<string, unknown>) => columns.map((c) => (r[c] === null ? "" : typeof r[c] === "object" ? JSON.stringify(r[c]) : (r[c] as string | number)))),
+      });
+    }
     if (format === "csv") return new Response("Use Excel for the full export: it has one sheet per table.", { status: 400 });
     name = "du-portal-all-data";
   } else if (REPORTS[report]) {
-    tables = [REPORTS[report](visiblePositionIds(user))];
+    tables = [await REPORTS[report](await visiblePositionIds(user))];
   } else {
     return new Response("Unknown report", { status: 404 });
   }
 
-  audit(user.id, "exported", "report", null, `${name}.${format}`);
+  await audit(user.id, "exported", "report", null, `${name}.${format}`);
   if (format === "csv") return fileResponse(toCsv(tables[0]), `${name}-${stamp}.csv`, "text/csv; charset=utf-8");
   return fileResponse(await toXlsx(tables), `${name}-${stamp}.xlsx`, XLSX);
 }

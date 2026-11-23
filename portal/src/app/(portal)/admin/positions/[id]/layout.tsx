@@ -16,9 +16,9 @@ export default async function PositionLayout({ children, params }: LayoutProps<"
   const { id } = await params;
   const p = await positionForPage(user, id);
   const base = `/admin/positions/${p.id}`;
-  const appCount = db.select({ n: count() }).from(applications).where(eq(applications.positionId, p.id)).get()?.n ?? 0;
-  const panelCount = db.select({ n: count() }).from(panels).where(eq(panels.positionId, p.id)).get()?.n ?? 0;
-  const eventCount = db.select({ n: count() }).from(events).where(eq(events.positionId, p.id)).get()?.n ?? 0;
+  const appCount = (await db.select({ n: count() }).from(applications).where(eq(applications.positionId, p.id)))[0]?.n ?? 0;
+  const panelCount = (await db.select({ n: count() }).from(panels).where(eq(panels.positionId, p.id)))[0]?.n ?? 0;
+  const eventCount = (await db.select({ n: count() }).from(events).where(eq(events.positionId, p.id)))[0]?.n ?? 0;
 
   return (
     <>

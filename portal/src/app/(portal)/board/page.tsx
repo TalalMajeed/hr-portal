@@ -10,14 +10,14 @@ import { Badge } from "@/components/ui/badge";
 
 export const metadata: Metadata = { title: "Board packs" };
 
-export default function BoardHome() {
-  const rows = db
+export default async function BoardHome() {
+  const rows = (await db
     .select({ p: positions, b: boards })
     .from(boards)
     .innerJoin(positions, eq(positions.id, boards.positionId))
     .where(isNotNull(boards.packGeneratedAt))
     .orderBy(desc(boards.packGeneratedAt))
-    .all()
+    )
     .filter((r) => r.p.stage === 10);
   return (
     <>

@@ -22,22 +22,22 @@ export const metadata: Metadata = { title: "Add candidates" };
 export default async function AgencyPositionPage({ params }: PageProps<"/agency/[positionId]">) {
   const user = await requireUser(["agency"]);
   const { positionId } = await params;
-  const row = db
+  const row = (await db
     .select({ p: positions, a: adverts })
     .from(positions)
     .innerJoin(adverts, eq(adverts.positionId, positions.id))
     .where(eq(positions.id, Number(positionId)))
-    .get();
+    )[0];
   if (!row || !row.a.publishedAt) notFound();
   const { p, a } = row;
   const open = advertIsOpen(a);
-  const uploads = db
+  const uploads = (await db
     .select({ app: applications, candidate: users })
     .from(applications)
     .innerJoin(users, eq(users.id, applications.candidateId))
     .where(and(eq(applications.positionId, p.id), eq(applications.agencyId, user.id)))
     .orderBy(desc(applications.id))
-    .all();
+    );
 
   return (
     <>

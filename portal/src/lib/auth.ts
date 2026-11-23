@@ -38,9 +38,9 @@ function hashToken(token: string) {
 export async function createSession(userId: number, pendingCode?: string) {
   const token = newToken(32);
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86_400_000).toISOString();
-  db.insert(authSessions)
+  await db.insert(authSessions)
     .values({ id: hashToken(token), userId, expiresAt, pendingCode: pendingCode ? hashToken(pendingCode) : null })
-    .run();
+    ;
   const jar = await cookies();
   jar.set(COOKIE, token, {
     httpOnly: true,
@@ -55,12 +55,12 @@ async function readSession() {
   const jar = await cookies();
   const token = jar.get(COOKIE)?.value;
   if (!token) return null;
-  const row = db
+  const row = (await db
     .select({ session: authSessions, user: users })
     .from(authSessions)
     .innerJoin(users, eq(users.id, authSessions.userId))
     .where(and(eq(authSessions.id, hashToken(token)), gt(authSessions.expiresAt, new Date().toISOString())))
-    .get();
+    )[0];
   if (!row || !row.user.active) return null;
   return row;
 }
@@ -83,14 +83,14 @@ export async function confirmSecondFactor(code: string) {
   const row = await getPendingUser();
   if (!row) return false;
   if (row.session.pendingCode !== hashToken(code.trim())) return false;
-  db.update(authSessions).set({ pendingCode: null }).where(eq(authSessions.id, row.session.id)).run();
+  await db.update(authSessions).set({ pendingCode: null }).where(eq(authSessions.id, row.session.id));
   return true;
 }
 
 export async function destroySession() {
   const jar = await cookies();
   const token = jar.get(COOKIE)?.value;
-  if (token) db.delete(authSessions).where(eq(authSessions.id, hashToken(token))).run();
+  if (token) await db.delete(authSessions).where(eq(authSessions.id, hashToken(token)));
   jar.delete(COOKIE);
 }
 

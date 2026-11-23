@@ -29,14 +29,14 @@ function NoteField() {
 export default async function SetupPage({ params }: PageProps<"/admin/positions/[id]/setup">) {
   const user = await requireUser(STAFF_ROLES);
   const p = await positionForPage(user, (await params).id);
-  const torP = getDoc(p.id, "tor_position");
-  const torC = getDoc(p.id, "tor_committee");
-  const jd = getDoc(p.id, "jd") ?? { ...EMPTY_JD, _version: 0 };
-  const criteria = getDoc(p.id, "criteria");
-  const rubric = getDoc(p.id, "rubric");
-  const templates = db.select().from(jdTemplates).all();
-  const history = docHistory(p.id);
-  const names = new Map(db.select({ id: users.id, name: users.name }).from(users).all().map((u) => [u.id, u.name]));
+  const torP = await getDoc(p.id, "tor_position");
+  const torC = await getDoc(p.id, "tor_committee");
+  const jd = await getDoc(p.id, "jd") ?? { ...EMPTY_JD, _version: 0 };
+  const criteria = await getDoc(p.id, "criteria");
+  const rubric = await getDoc(p.id, "rubric");
+  const templates = (await db.select().from(jdTemplates));
+  const history = await docHistory(p.id);
+  const names = new Map((await db.select({ id: users.id, name: users.name }).from(users)).map((u) => [u.id, u.name]));
   const { _version: _rv, ...rubricContent } = rubric ?? { ...EMPTY_RUBRIC, _version: 0 };
   void _rv;
   const locked = user.role === "board";

@@ -16,12 +16,12 @@ export type PendingItem = {
 };
 
 /** Everything waiting for HR or the ED: positions, ads, shortlists and panels. */
-export function pendingApprovals(): PendingItem[] {
+export async function pendingApprovals(): Promise<PendingItem[]> {
   const items: PendingItem[] = [];
-  const all = db.select().from(positions).all();
+  const all = (await db.select().from(positions));
   const byId = new Map(all.map((p) => [p.id, p]));
-  const lastStep = (positionId: number, subject: "position" | "advert" | "shortlist" | "panel") =>
-    db.select().from(approvals).where(eq(approvals.positionId, positionId)).orderBy(desc(approvals.id)).all().find((a) => a.subject === subject);
+  const lastStep = async (positionId: number, subject: "position" | "advert" | "shortlist" | "panel") =>
+    (await db.select().from(approvals).where(eq(approvals.positionId, positionId)).orderBy(desc(approvals.id))).find((a) => a.subject === subject);
 
   for (const p of all) {
     if (p.approvalStatus === "hr_review" || p.approvalStatus === "ed_review") {
@@ -32,24 +32,24 @@ export function pendingApprovals(): PendingItem[] {
         title: p.title,
         waitingOn: p.approvalStatus === "hr_review" ? "HR" : "ED",
         detail: "New position request",
-        since: lastStep(p.id, "position")?.createdAt ?? p.updatedAt,
+        since: (await lastStep(p.id, "position"))?.createdAt ?? p.updatedAt,
         href: `/admin/positions/${p.id}`,
       });
     }
-    const sl = lastStep(p.id, "shortlist");
+    const sl = await lastStep(p.id, "shortlist");
     if (sl?.action === "submitted" && !p.shortlistApproved) {
       items.push({ kind: "shortlist", positionId: p.id, code: p.code, title: p.title, waitingOn: "ED", detail: "Shortlist", since: sl.createdAt, href: `/admin/positions/${p.id}/applications` });
     }
   }
 
-  const pendingAds = db.select().from(adverts).where(eq(adverts.status, "pending_approval")).all();
+  const pendingAds = (await db.select().from(adverts).where(eq(adverts.status, "pending_approval")));
   for (const a of pendingAds) {
     const p = byId.get(a.positionId);
     if (!p) continue;
     items.push({ kind: "advert", positionId: p.id, code: p.code, title: p.title, waitingOn: "ED", detail: "Advertisement", since: a.updatedAt, href: `/admin/positions/${p.id}/advert` });
   }
 
-  const pendingPanels = db.select().from(panels).where(inArray(panels.status, ["pending_approval"])).all();
+  const pendingPanels = (await db.select().from(panels).where(inArray(panels.status, ["pending_approval"])));
   for (const pn of pendingPanels) {
     const p = byId.get(pn.positionId);
     if (!p) continue;
@@ -60,7 +60,7 @@ export function pendingApprovals(): PendingItem[] {
       title: p.title,
       waitingOn: "ED",
       detail: `${ROUND_LABELS[pn.round]} panel`,
-      since: lastStep(p.id, "panel")?.createdAt ?? pn.createdAt,
+      since: (await lastStep(p.id, "panel"))?.createdAt ?? pn.createdAt,
       href: `/admin/positions/${p.id}/panels`,
     });
   }

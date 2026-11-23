@@ -19,13 +19,13 @@ export const metadata: Metadata = { title: "My panels" };
 
 export default async function PanelHome() {
   const user = await requireUser(["panel"]);
-  const memberships = panelsForUser(user.id).filter((m) => m.member.inviteStatus !== "replaced");
+  const memberships = (await panelsForUser(user.id)).filter((m) => m.member.inviteStatus !== "replaced");
   const positionIds = [...new Set(memberships.map((m) => m.panel.positionId))];
-  const posList = positionIds.length ? db.select().from(positions).where(inArray(positions.id, positionIds)).all() : [];
-  const visibleApps = panelApplicationIds(user.id);
+  const posList = positionIds.length ? (await db.select().from(positions).where(inArray(positions.id, positionIds))) : [];
+  const visibleApps = await panelApplicationIds(user.id);
   const acceptedPanels = memberships.filter((m) => m.member.inviteStatus === "accepted").map((m) => m.panel.id);
   const sessions = acceptedPanels.length
-    ? db
+    ? (await db
         .select({ e: events, name: users.name, title: positions.title })
         .from(events)
         .innerJoin(applications, eq(applications.id, events.applicationId))
@@ -33,11 +33,11 @@ export default async function PanelHome() {
         .innerJoin(positions, eq(positions.id, events.positionId))
         .where(and(inArray(events.panelId, acceptedPanels), inArray(events.status, ["invited", "confirmed", "reschedule_requested", "completed"])))
         .orderBy(asc(events.startsAt))
-        .all()
+        )
         .filter((s) => visibleApps.includes(s.e.applicationId))
     : [];
   const mine = sessions.length
-    ? db.select().from(evaluations).where(and(eq(evaluations.panelistId, user.id), inArray(evaluations.eventId, sessions.map((s) => s.e.id)))).all()
+    ? (await db.select().from(evaluations).where(and(eq(evaluations.panelistId, user.id), inArray(evaluations.eventId, sessions.map((s) => s.e.id)))))
     : [];
   const todo = sessions.filter((s) => mine.find((m) => m.eventId === s.e.id)?.status !== "submitted");
 

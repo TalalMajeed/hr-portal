@@ -18,13 +18,13 @@ export default async function PanelCandidatePage({ params }: PageProps<"/panel/c
   const user = await requireUser(["panel"]);
   const { appId } = await params;
   const id = Number(appId);
-  if (!panelApplicationIds(user.id).includes(id)) notFound();
-  const app = db.select().from(applications).where(eq(applications.id, id)).get();
+  if (!(await panelApplicationIds(user.id)).includes(id)) notFound();
+  const app = (await db.select().from(applications).where(eq(applications.id, id)))[0];
   if (!app?.snapshot) notFound();
-  const position = db.select().from(positions).where(eq(positions.id, app.positionId)).get()!;
-  const advert = db.select().from(adverts).where(eq(adverts.positionId, position.id)).get();
-  const supporting = db.select().from(documents).where(eq(documents.applicationId, app.id)).all();
-  audit(user.id, "viewed", "application", app.id, "panel file");
+  const position = (await db.select().from(positions).where(eq(positions.id, app.positionId)))[0]!;
+  const advert = (await db.select().from(adverts).where(eq(adverts.positionId, position.id)))[0];
+  const supporting = (await db.select().from(documents).where(eq(documents.applicationId, app.id)));
+  await audit(user.id, "viewed", "application", app.id, "panel file");
   return (
     <>
       <PageHeader crumbs={[{ label: "My panels", href: "/panel" }, { label: app.snapshot.name }]} title={app.snapshot.name} description={`${position.title} · ${app.appNo}`} />

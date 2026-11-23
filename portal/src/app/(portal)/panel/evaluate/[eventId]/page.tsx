@@ -27,14 +27,14 @@ export const metadata: Metadata = { title: "Evaluation" };
 export default async function EvaluatePage({ params }: PageProps<"/panel/evaluate/[eventId]">) {
   const user = await requireUser(["panel"]);
   const { eventId } = await params;
-  const e = db.select().from(events).where(eq(events.id, Number(eventId))).get();
-  if (!e || !eventPanelists(e).some((m) => m.user.id === user.id)) notFound();
-  const r = loadEvent(e.id)!;
-  const items = getDoc(e.positionId, "rubric")?.[e.round] ?? [];
-  const ev = db.select().from(evaluations).where(and(eq(evaluations.eventId, e.id), eq(evaluations.panelistId, user.id))).get();
+  const e = (await db.select().from(events).where(eq(events.id, Number(eventId))))[0];
+  if (!e || !(await eventPanelists(e)).some((m) => m.user.id === user.id)) notFound();
+  const r = (await loadEvent(e.id))!;
+  const items = (await getDoc(e.positionId, "rubric"))?.[e.round] ?? [];
+  const ev = (await db.select().from(evaluations).where(and(eq(evaluations.eventId, e.id), eq(evaluations.panelistId, user.id))))[0];
   const locked = ev?.status === "submitted";
   const cancelled = ["cancelled", "declined"].includes(e.status);
-  audit(user.id, "viewed", "evaluation", e.id);
+  await audit(user.id, "viewed", "evaluation", e.id);
   const low = ev ? belowMinimum(ev.scores, items) : [];
 
   return (

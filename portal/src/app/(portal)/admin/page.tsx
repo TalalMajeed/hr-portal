@@ -33,20 +33,20 @@ function MiniStages({ stage }: { stage: number }) {
 /** I1: open positions, applications, stage of each position, this week's interviews, pending evaluations and decisions. */
 export default async function Dashboard() {
   const user = await requireUser(STAFF_ROLES);
-  closeExpiredAdverts();
-  const scope = visiblePositionIds(user);
+  await closeExpiredAdverts();
+  const scope = await visiblePositionIds(user);
   const inScope = (id: number) => !scope || scope.includes(id);
 
-  const ps = db.select().from(positions).orderBy(asc(positions.stage)).all().filter((p) => inScope(p.id));
+  const ps = (await db.select().from(positions).orderBy(asc(positions.stage))).filter((p) => inScope(p.id));
   const active = ps.filter((p) => p.status === "active");
-  const apps = db.select().from(applications).all().filter((a) => inScope(a.positionId) && a.status !== "draft");
+  const apps = (await db.select().from(applications)).filter((a) => inScope(a.positionId) && a.status !== "draft");
   const appsByPos = new Map<number, number>();
   for (const a of apps) appsByPos.set(a.positionId, (appsByPos.get(a.positionId) ?? 0) + 1);
   const now = new Date();
   const recent = apps.filter((a) => a.submittedAt && now.getTime() - new Date(a.submittedAt).getTime() < 7 * 86_400_000).length;
 
   const weekEnd = new Date(now.getTime() + 7 * 86_400_000);
-  const upcoming = db
+  const upcoming = (await db
     .select({ e: events, name: users.name, title: positions.title, code: positions.code })
     .from(events)
     .innerJoin(applications, eq(applications.id, events.applicationId))
@@ -54,13 +54,13 @@ export default async function Dashboard() {
     .innerJoin(positions, eq(positions.id, events.positionId))
     .where(and(gte(events.startsAt, now.toISOString()), lte(events.startsAt, weekEnd.toISOString())))
     .orderBy(asc(events.startsAt))
-    .all()
+    )
     .filter((r) => inScope(r.e.positionId) && !["cancelled", "declined"].includes(r.e.status));
 
   // Evaluations owed: accepted panel members of past sessions without a submitted form.
-  const pastEvents = db.select().from(events).where(lte(events.startsAt, now.toISOString())).all().filter((e) => inScope(e.positionId) && e.panelId && !["cancelled", "declined"].includes(e.status));
-  const evals = db.select().from(evaluations).all();
-  const members = db.select().from(panelMembers).where(eq(panelMembers.inviteStatus, "accepted")).all();
+  const pastEvents = (await db.select().from(events).where(lte(events.startsAt, now.toISOString()))).filter((e) => inScope(e.positionId) && e.panelId && !["cancelled", "declined"].includes(e.status));
+  const evals = (await db.select().from(evaluations));
+  const members = (await db.select().from(panelMembers).where(eq(panelMembers.inviteStatus, "accepted")));
   let pendingEvals = 0;
   const pendingByPos = new Map<number, number>();
   for (const e of pastEvents) {
@@ -73,8 +73,8 @@ export default async function Dashboard() {
     }
   }
 
-  const approvals = pendingApprovals().filter((a) => inScope(a.positionId));
-  const boardRows = db.select().from(boards).all();
+  const approvals = (await pendingApprovals()).filter((a) => inScope(a.positionId));
+  const boardRows = (await db.select().from(boards));
   const awaitingDecision = ps.filter((p) => p.stage === 10 && p.status === "active" && !boardRows.find((b) => b.positionId === p.id)?.edSignedOffAt);
   const decisionCount = approvals.length + awaitingDecision.length;
   const pktHour = (now.getUTCHours() + 5) % 24;
